@@ -1,14 +1,15 @@
 package registry
 
 const (
-	UPDATED = "UPDATED"
+	NEW     = "NEW"
+	CHANGED = "CHANGED"
 	DELETED = "DELETED"
 )
 
 // Service represents a registered service
 type Service struct {
 	Name      string
-	Instances []*ServiceInstance
+	Instances map[string]*ServiceInstance
 }
 
 // ServiceInstance represents an instance of a service
@@ -21,8 +22,9 @@ type ServiceInstance struct {
 
 // ServiceUpdate represents a service update event
 type ServiceUpdate struct {
+	ServiceName      string
 	UpdateType       string
-	ServiceInstances []*ServiceInstance
+	ServiceInstances map[string]*ServiceInstance
 }
 
 // Config represents a registry's configuration

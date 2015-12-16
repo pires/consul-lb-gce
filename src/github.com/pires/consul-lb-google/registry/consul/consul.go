@@ -81,7 +81,8 @@ func (cr *consulRegistry) Run(upstream chan<- *registry.ServiceUpdate, done <-ch
 
 				// send clearing update upstream.
 				upstream <- &registry.ServiceUpdate{
-					UpdateType: registry.DELETED,
+					ServiceName: srv.Name,
+					UpdateType:  registry.DELETED,
 				}
 				break
 			}
@@ -90,13 +91,17 @@ func (cr *consulRegistry) Run(upstream chan<- *registry.ServiceUpdate, done <-ch
 			if !srv.running {
 				go cr.watchService(srv, upstream)
 				srv.running = true
+				upstream <- &registry.ServiceUpdate{
+					ServiceName: srv.Name,
+					UpdateType:  registry.NEW,
+				}
 			}
 		}
 	}
 }
 
 func (cr *consulRegistry) stop() {
-	// The lock prevents Run from terminating while the watchers attempt
+	// lock prevents Run from terminating while the watchers attempt
 	// to send on their channels.
 	cr.Lock()
 	defer cr.Unlock()
@@ -190,16 +195,16 @@ func (cr *consulRegistry) watchService(service *consulService, upstream chan<- *
 			continue
 		}
 		service.lastIndex = meta.LastIndex
-		service.Instances = make([]*registry.ServiceInstance, 0, len(nodes))
+		service.Instances = make(map[string]*registry.ServiceInstance, len(nodes))
 
 		for _, node := range nodes {
-			service.Instances = append(service.Instances, &registry.ServiceInstance{
+			service.Instances[node.Node] = &registry.ServiceInstance{
 				Host:    node.Node,
 				Address: node.Address,
 				Tags:    node.ServiceTags,
 				Port:    strconv.Itoa(node.ServicePort),
-				//				ServiceId:   node.ServiceID,
-			})
+				// ServiceId:   node.ServiceID,
+			}
 		}
 
 		cr.Lock()
@@ -212,7 +217,11 @@ func (cr *consulRegistry) watchService(service *consulService, upstream chan<- *
 		}
 
 		// tell upstream about the updates
-		upstream <- &registry.ServiceUpdate{registry.UPDATED, service.Instances}
+		upstream <- &registry.ServiceUpdate{
+			ServiceName:      service.Name,
+			UpdateType:       registry.CHANGED,
+			ServiceInstances: service.Instances,
+		}
 		cr.Unlock()
 	}
 }
