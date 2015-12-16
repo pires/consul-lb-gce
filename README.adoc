@@ -1,0 +1,50 @@
+:sectnums:
+:numbered:
+:toc: macro
+:toc-title:
+:toclevels: 99
+
+# consul-lb-gce
+
+A smart Google Cloud Engine load-balancer manager for Consul backed services.
+
+toc::[]
+
+## Pre-requisites
+
+* Go 1.5.x
+* `make`
+* Some Go tools
+** http://getgb.io[`gb`] - `go get -u github.com/constabulary/gb/...`
+
+## Development
+
+### Build
+
+The following will take care of generating code, build and run tests.
+```
+make all
+```
+
+### Test
+
+```
+gb build all
+bin/consul-lb-google -consul 172.17.9.100:8500 -alsologtostderr
+```
+
+You should see something like:
+```
+I1215 23:46:47.660879   19606 main.go:25] Starting..
+I1215 23:46:47.661938   19606 main.go:30] Connection to Consul at 172.17.9.100:8500..
+I1215 23:46:47.661977   19606 main.go:38] Initiating registry..
+I1215 23:46:47.662025   19606 main.go:43] Waiting for service updates..
+
+I1215 23:47:25.191058   19606 main.go:48] UPDATE: UPDATED
+I1215 23:47:25.191979   19606 main.go:48] UPDATE: UPDATED
+I1215 23:47:30.862656   19606 main.go:48] UPDATE: UPDATED
+I1215 23:47:47.362204   19606 main.go:48] UPDATE: UPDATED
+I1215 23:47:47.362222   19606 main.go:48] UPDATE: DELETED
+^C
+I1215 23:48:47.783924   19606 main.go:61] Terminated
+```
