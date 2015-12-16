@@ -6,7 +6,7 @@
 
 # consul-lb-gce
 
-A smart Google Cloud Engine load-balancer manager for Consul backed services.
+A smart Google Cloud Engine load-balancer manager for [Consul](https://www.consul.io/) backed services.
 
 toc::[]
 
@@ -28,23 +28,80 @@ make all
 
 ### Test
 
+To test this locally, you'll need [a Nomad cluster with Consul integration](https://github.com/pires/nomad-vagrant-coreos-cluster).
+Clone the repo and run:
+
+```
+vagrant up
+```
+
+You should have one server and two clients running.
+
+Now, before deploying the `nginx` service example, let's compile and run the load-balancer manager. On another terminal window, execute:
+
 ```
 gb build all
-bin/consul-lb-google -consul 172.17.9.100:8500 -alsologtostderr
+GOOGLE_APPLICATION_CREDENTIALS=~/Work/gce/my-project-1234567890.json bin/consul-lb-google -project-id my-project-id -network my-network -consul 172.17.9.100:8500 -alsologtostderr
 ```
 
 You should see something like:
 ```
-I1215 23:46:47.660879   19606 main.go:25] Starting..
-I1215 23:46:47.661938   19606 main.go:30] Connection to Consul at 172.17.9.100:8500..
-I1215 23:46:47.661977   19606 main.go:38] Initiating registry..
-I1215 23:46:47.662025   19606 main.go:43] Waiting for service updates..
+I1216 22:06:42.966122   27247 main.go:31] Starting..
+I1216 22:06:42.972679   27247 main.go:34] Initializing cloud client [Project ID: my-project-id, Network: my-network]..
+I1216 22:06:44.598845   27247 main.go:41] Connecting to Consul at 172.17.9.100:8500..
+I1216 22:06:44.600071   27247 main.go:49] Initiating registry..
+I1216 22:06:44.600086   27247 main.go:56] Waiting for service updates..
+```
 
-I1215 23:47:25.191058   19606 main.go:48] UPDATE: UPDATED
-I1215 23:47:25.191979   19606 main.go:48] UPDATE: UPDATED
-I1215 23:47:30.862656   19606 main.go:48] UPDATE: UPDATED
-I1215 23:47:47.362204   19606 main.go:48] UPDATE: UPDATED
-I1215 23:47:47.362222   19606 main.go:48] UPDATE: DELETED
-^C
-I1215 23:48:47.783924   19606 main.go:61] Terminated
+Deploy the `nginx` example:
+
+```
+nomad run web.hcl
+```
+
+Looking at the load-balancer manager terminal window, one should see something like:
+```
+I1216 22:24:01.046739   27337 main.go:110] Watching service [web].
+I1216 22:24:01.046767   27337 cloud.go:81] Creating instance groups for [web]..
+I1216 22:24:05.354576   27337 cloud.go:85] Created instance group [asia-east1-b-web] in zone [asia-east1-b].
+I1216 22:24:09.306784   27337 cloud.go:85] Created instance group [asia-east1-a-web] in zone [asia-east1-a].
+I1216 22:24:13.647723   27337 cloud.go:85] Created instance group [asia-east1-c-web] in zone [asia-east1-c].
+I1216 22:24:17.641366   27337 cloud.go:85] Created instance group [europe-west1-c-web] in zone [europe-west1-c].
+I1216 22:24:21.737282   27337 cloud.go:85] Created instance group [europe-west1-b-web] in zone [europe-west1-b].
+I1216 22:24:25.731770   27337 cloud.go:85] Created instance group [europe-west1-d-web] in zone [europe-west1-d].
+I1216 22:24:29.834404   27337 cloud.go:85] Created instance group [us-central1-a-web] in zone [us-central1-a].
+I1216 22:24:33.821033   27337 cloud.go:85] Created instance group [us-central1-c-web] in zone [us-central1-c].
+I1216 22:24:37.814080   27337 cloud.go:85] Created instance group [us-central1-b-web] in zone [us-central1-b].
+I1216 22:24:41.807664   27337 cloud.go:85] Created instance group [us-central1-f-web] in zone [us-central1-f].
+I1216 22:24:45.903755   27337 cloud.go:85] Created instance group [us-east1-b-web] in zone [us-east1-b].
+I1216 22:24:49.908540   27337 cloud.go:85] Created instance group [us-east1-c-web] in zone [us-east1-c].
+I1216 22:24:54.095646   27337 cloud.go:85] Created instance group [us-east1-d-web] in zone [us-east1-d].
+I1216 22:24:54.095671   27337 cloud.go:104] Creating instance groups for [web] completed successfully
+```
+
+Now, stop it:
+
+```
+nomad stop web
+```
+
+Looking again at the load-balancer manager terminal window, one should see something like:
+
+```
+I1216 22:34:15.000185   27337 main.go:118] Stopped watching service [web].
+I1216 22:34:15.000204   27337 cloud.go:112] Removing instance groups for [web]..
+W1216 22:34:19.446552   27337 cloud.go:118] Removed instance group [asia-east1-b-web] from zone [asia-east1-b].
+W1216 22:34:23.444537   27337 cloud.go:118] Removed instance group [asia-east1-a-web] from zone [asia-east1-a].
+W1216 22:34:27.744633   27337 cloud.go:118] Removed instance group [asia-east1-c-web] from zone [asia-east1-c].
+W1216 22:34:31.672407   27337 cloud.go:118] Removed instance group [europe-west1-c-web] from zone [europe-west1-c].
+W1216 22:34:35.627727   27337 cloud.go:118] Removed instance group [europe-west1-b-web] from zone [europe-west1-b].
+W1216 22:34:39.519136   27337 cloud.go:118] Removed instance group [europe-west1-d-web] from zone [europe-west1-d].
+W1216 22:34:43.552380   27337 cloud.go:118] Removed instance group [us-central1-a-web] from zone [us-central1-a].
+W1216 22:34:47.509866   27337 cloud.go:118] Removed instance group [us-central1-c-web] from zone [us-central1-c].
+W1216 22:34:51.289195   27337 cloud.go:118] Removed instance group [us-central1-b-web] from zone [us-central1-b].
+W1216 22:34:55.288013   27337 cloud.go:118] Removed instance group [us-central1-f-web] from zone [us-central1-f].
+W1216 22:34:59.285642   27337 cloud.go:118] Removed instance group [us-east1-b-web] from zone [us-east1-b].
+W1216 22:35:03.276169   27337 cloud.go:118] Removed instance group [us-east1-c-web] from zone [us-east1-c].
+W1216 22:35:07.492766   27337 cloud.go:118] Removed instance group [us-east1-d-web] from zone [us-east1-d].
+I1216 22:35:07.492786   27337 cloud.go:130] Removing instance groups for [web] completed successfully
 ```

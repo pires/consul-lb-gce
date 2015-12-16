@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"sync"
 
+	"github.com/pires/consul-lb-google/cloud"
 	"github.com/pires/consul-lb-google/registry"
 	"github.com/pires/consul-lb-google/registry/consul"
 
@@ -16,6 +17,12 @@ const ()
 
 var (
 	consulAddr = flag.String("consul", "consul.service.consul:8500", "Consul server adress (host:port)")
+	projectId  = flag.String("project-id", "default", "Project ID")
+	network    = flag.String("network", "default", "Network name")
+
+	client cloud.Cloud
+
+	err error
 )
 
 func main() {
@@ -23,7 +30,12 @@ func main() {
 
 	glog.Info("Starting..")
 
-	// TODO GCP stuff
+	// provision cloud client
+	glog.Infof("Initializing cloud client [Project ID: %s, Network: %s]..", *projectId, *network)
+	client, err = cloud.New(*projectId, *network)
+	if err != nil {
+		panic(err)
+	}
 
 	// connect to Consul
 	glog.Infof("Connecting to Consul at %s..", *consulAddr)
@@ -96,6 +108,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 					serviceName = update.ServiceName
 					isRunning = true
 					glog.Infof("Watching service [%s].", serviceName)
+					client.CreateInstanceGroup(serviceName)
 				}
 				lock.Unlock()
 			case registry.DELETED:
@@ -104,9 +117,14 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 					isRunning = false
 					glog.Infof("Stopped watching service [%s].", serviceName)
 				}
+				// remove everything
+				// do it outside of the conditional block above, just in case there's
+				// stalled stuff in the cloud that should be removed
+				client.RemoveInstanceGroup(serviceName)
 				lock.Unlock()
 			case registry.CHANGED:
 				lock.Lock()
+
 				// have all instances been removed?
 				if len(update.ServiceInstances) == 0 {
 					// TODO delete all instances from instance group
