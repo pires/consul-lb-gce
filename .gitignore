@@ -1,0 +1,16 @@
+## Go
+bin
+pkg
+
+## IntelliJ
+.idea
+*.iml
+
+## app generated files
+*.log
+
+# ffjson garbage
+*_ffjson*.go
+
+## generated proto
+*.pb.go
