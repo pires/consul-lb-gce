@@ -66,7 +66,7 @@ nomad run web.hcl
 Looking at the load-balancer manager terminal window, one should see something like:
 ```
 I1217 21:03:05.030698       1 main.go:44] Starting..
-I1217 21:03:05.031059       1 main.go:53] Initializing cloud client [Project ID: gcp-tests-1159, Network: nomad-network, Allowed Zones: []string{"us-east1-d", "europe-west1-d", "asia-east1-c"}]..
+I1217 21:03:05.031059       1 main.go:53] Initializing cloud client [Project ID: my-project-id, Network: nomad-network, Allowed Zones: []string{"us-east1-d", "europe-west1-d", "asia-east1-c"}]..
 I1217 21:03:05.031232       1 main.go:60] Connecting to Consul at consul.service.consul:8500..
 I1217 21:03:05.031260       1 main.go:68] Initiating registry..
 I1217 21:03:05.031270       1 main.go:75] Waiting for service updates..
@@ -76,7 +76,7 @@ I1217 21:04:09.408970       1 cloud.go:73] Creating instance group [us-east1-d-w
 I1217 21:04:13.338217       1 cloud.go:73] Creating instance group [europe-west1-d-web] in zone [europe-west1-d].
 I1217 21:04:16.964163       1 cloud.go:73] Creating instance group [asia-east1-c-web] in zone [asia-east1-c].
 I1217 21:04:20.966326       1 cloud.go:93] Created instance groups for [web] successfully
-W1217 21:04:20.966353       1 main.go:186] Creating instance [client-us-01.c.gcp-tests-1159.internal].
+W1217 21:04:20.966353       1 main.go:186] Creating instance [client-us-01.c.my-project-id.internal].
 I1217 21:04:20.966587       1 cloud.go:125] Adding 1 instances into instance group [web]
 I1217 21:04:21.654564       1 cloud.go:174] There are 1 instances to add to instance group [web] on zone [us-east1-d]. Adding..
 I1217 21:04:22.563552       1 cloud.go:179] There are no instances to add to instance group [web] on zone [europe-west1-d].
