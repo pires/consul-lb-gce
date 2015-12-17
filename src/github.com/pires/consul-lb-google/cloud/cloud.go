@@ -50,27 +50,16 @@ type gceCloud struct {
 	instanceGroups map[string]map[string]*instanceGroup
 }
 
-func New(projectID string, networkURL string) (Cloud, error) {
+func New(projectID string, networkURL string, allowedZones []string) (Cloud, error) {
 	// try and provision GCE client
 	c, err := gce.CreateGCECloud(projectID, networkURL)
 	if err != nil {
 		return nil, err
 	}
 
-	// try and retrieve zones
-	zoneList, err := c.GetAvailableZones()
-	if err != nil {
-		return nil, err
-	}
-
-	zones := make([]string, len(zoneList.Items))
-	for pos, z := range zoneList.Items {
-		zones[pos] = z.Name
-	}
-
 	return &gceCloud{
 		client:         c,
-		zones:          zones,
+		zones:          allowedZones,
 		instanceGroups: make(map[string]map[string]*instanceGroup),
 	}, nil
 }

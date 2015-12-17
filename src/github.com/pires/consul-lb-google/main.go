@@ -10,37 +10,57 @@ import (
 	"github.com/pires/consul-lb-google/registry"
 	"github.com/pires/consul-lb-google/registry/consul"
 
+	"github.com/BurntSushi/toml"
 	"github.com/golang/glog"
 )
 
 const ()
 
 var (
-	consulAddr = flag.String("consul", "consul.service.consul:8500", "Consul server adress (host:port)")
-	projectId  = flag.String("project-id", "default", "Project ID")
-	network    = flag.String("network", "default", "Network name")
+	config = flag.String("config", "config.toml", "Path to the configuration file")
 
 	client cloud.Cloud
 
 	err error
 )
 
+type consulConfiguration struct {
+	Url string
+}
+
+type cloudConfiguration struct {
+	Project      string
+	Network      string
+	AllowedZones []string `toml:"allowed_zones"`
+}
+
+type configuration struct {
+	Consul consulConfiguration
+	Cloud  cloudConfiguration
+}
+
 func main() {
 	flag.Parse()
 
 	glog.Info("Starting..")
 
+	// read configuration
+	var cfg configuration
+	if _, err := toml.DecodeFile(*config, &cfg); err != nil {
+		panic(err)
+	}
+
 	// provision cloud client
-	glog.Infof("Initializing cloud client [Project ID: %s, Network: %s]..", *projectId, *network)
-	client, err = cloud.New(*projectId, *network)
+	glog.Infof("Initializing cloud client [Project ID: %s, Network: %s, Allowed Zones: %#v]..", cfg.Cloud.Project, cfg.Cloud.Network, cfg.Cloud.AllowedZones)
+	client, err = cloud.New(cfg.Cloud.Project, cfg.Cloud.Network, cfg.Cloud.AllowedZones)
 	if err != nil {
 		panic(err)
 	}
 
 	// connect to Consul
-	glog.Infof("Connecting to Consul at %s..", *consulAddr)
+	glog.Infof("Connecting to Consul at %s..", cfg.Consul.Url)
 	r, err := consul.NewRegistry(&registry.Config{
-		Addresses: []string{*consulAddr},
+		Addresses: []string{cfg.Consul.Url},
 	})
 	if err != nil {
 		panic(err)
