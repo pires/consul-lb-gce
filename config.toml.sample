@@ -1,0 +1,7 @@
+[consul]
+url = "consul.service.consul:8500"
+
+[cloud]
+project = "my-project-id"
+network = "default"
+allowed_zones = ["us-east1-d", "europe-west1-d", "asia-east1-c"]
