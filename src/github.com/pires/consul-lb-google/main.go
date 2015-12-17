@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 
 	"github.com/pires/consul-lb-google/cloud"
@@ -13,8 +14,6 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/golang/glog"
 )
-
-const ()
 
 var (
 	config = flag.String("config", "config.toml", "Path to the configuration file")
@@ -135,6 +134,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 				lock.Lock()
 				if isRunning {
 					isRunning = false
+					instances = make(map[string]*registry.ServiceInstance)
 					glog.Infof("Stopped watching service [%s].", serviceName)
 				}
 				// remove everything
@@ -145,34 +145,59 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 			case registry.CHANGED:
 				lock.Lock()
 
+				// TODO validate if we've created the instance group for this service
+				// if not, print warning.. possible recreate
+
 				// have all instances been removed?
 				if len(update.ServiceInstances) == 0 {
-					// TODO delete all instances from instance group
+					toRemove := make([]string, 0, len(instances))
+					for k := range instances {
+						// need to split k because Consul stores FQDN
+						toRemove = append(toRemove, strings.Split(k, ".")[0])
+					}
+					if len(toRemove) > 0 {
+						client.RemoveInstancesFromInstanceGroup(toRemove, serviceName)
+					}
 				} else {
 					// identify any deleted instances and remove from instance group
 					if len(update.ServiceInstances) < len(instances) {
 						glog.Warningf("Removing %d instances.", len(instances)-len(update.ServiceInstances))
+						var toRemove []string
 						for k := range instances {
 							if _, ok := update.ServiceInstances[k]; !ok {
+								// need to split k because Consul stores FQDN
+								toRemove = append(toRemove, strings.Split(k, ".")[0])
 								delete(instances, k)
-								// TODO remove from cloud
 								glog.Warningf("Removing instance [%s].", k)
 							}
+						}
+
+						// do we have instances to remove from the instance group?
+						if len(toRemove) > 0 {
+							client.RemoveInstancesFromInstanceGroup(toRemove, serviceName)
 						}
 					}
 
 					// find new or changed instances and create or change accordingly in cloud
 					for k, v := range update.ServiceInstances {
+						var toAdd []string
 						if instance, ok := instances[k]; !ok {
 							// new instance, create
 							glog.Warningf("Creating instance [%s].", k)
 							instances[k] = v
-							// TODO create in cloud
+							// mark as new instance for further processing
+							// need to split k because Consul stores FQDN
+							toAdd = append(toAdd, strings.Split(k, ".")[0])
 						} else {
 							glog.Warningf("Probable changes in [%s].", instance)
 							// already exists, compare
 							// TODO handle service port changes
 							// TODO change in cloud
+						}
+
+						// do we have new instances to add to the instance group?
+						if len(toAdd) > 0 {
+							client.AddInstancesToInstanceGroup(toAdd, serviceName)
 						}
 					}
 

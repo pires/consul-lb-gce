@@ -22,11 +22,11 @@ type Cloud interface {
 	// RemoveInstanceGroup removes an instance group
 	RemoveInstanceGroup(groupName string) error
 
-	// AddInstanceToInstanceGroup adds an instance to an instance group
-	//	AddInstanceToInstanceGroup(instanceName string, groupName string) error
+	// AddInstancesToInstanceGroup adds a sert of instances to an instance group
+	AddInstancesToInstanceGroup(instanceNames []string, groupName string) error
 
-	// RemoveInstanceFromInstanceGroup removes an instance from an instance group
-	//	RemoveInstanceFromInstanceGroup(instanceName string, groupName string) error
+	// RemoveInstancesFromInstanceGroup removes a set of instances from an instance group
+	RemoveInstancesFromInstanceGroup(instanceNames []string, groupName string) error
 }
 
 type instanceGroup struct {
@@ -50,9 +50,9 @@ type gceCloud struct {
 	instanceGroups map[string]map[string]*instanceGroup
 }
 
-func New(projectID string, networkURL string, allowedZones []string) (Cloud, error) {
+func New(projectID string, network string, allowedZones []string) (Cloud, error) {
 	// try and provision GCE client
-	c, err := gce.CreateGCECloud(projectID, networkURL)
+	c, err := gce.CreateGCECloud(projectID, network)
 	if err != nil {
 		return nil, err
 	}
@@ -69,14 +69,14 @@ func (c *gceCloud) CreateInstanceGroup(groupName string) error {
 	cleanup := false
 	glog.Infof("Creating instance groups for [%s]..", groupName)
 	for _, zone := range c.zones {
-		finalGroupName := zonifyName(zone, groupName)
+		finalGroupName := zonify(zone, groupName)
+		glog.Infof("Creating instance group [%s] in zone [%s].", finalGroupName, zone)
 		if err := c.client.CreateInstanceGroupForZone(finalGroupName, zone /*TODO define ports*/, make(map[string]int64)); err == nil {
-			glog.Infof("Created instance group [%s] in zone [%s].", finalGroupName, zone)
 			m := make(map[string]*instanceGroup, 1)
 			m[finalGroupName] = &instanceGroup{} // empty
 			c.instanceGroups[zone] = m
 		} else {
-			glog.Errorf("There was an error creating instance group [%s] in zone [%s]. Error: %#v", finalGroupName, zone, err)
+			glog.Errorf("There was an error creating instance group [%s] in zone [%s]. Error: %s", finalGroupName, zone, err)
 			cleanup = true
 			break
 		}
@@ -90,7 +90,7 @@ func (c *gceCloud) CreateInstanceGroup(groupName string) error {
 		return ErrCantCreateInstanceGroup
 	}
 
-	glog.Infof("Creating instance groups for [%s] completed successfully", groupName)
+	glog.Infof("Created instance groups for [%s] successfully", groupName)
 
 	return nil
 }
@@ -102,11 +102,11 @@ func (c *gceCloud) RemoveInstanceGroup(groupName string) error {
 	// delete created instance groups
 	for _, zone := range c.zones {
 		if _, ok := c.instanceGroups[zone]; ok {
-			finalGroupName := zonifyName(zone, groupName)
+			finalGroupName := zonify(zone, groupName)
 			if err := c.client.DeleteInstanceGroupForZone(finalGroupName, zone); err == nil {
 				glog.Warningf("Removed instance group [%s] from zone [%s].", finalGroupName, zone)
 			} else {
-				glog.Errorf("HUMAN INTERVERTION REQUIRED: Failed to remove instance group [%s] from zone [%s]. Error: %#v", finalGroupName, zone)
+				glog.Errorf("HUMAN INTERVERTION REQUIRED: Failed to remove instance group [%s] from zone [%s]. Error: %s", finalGroupName, zone, err)
 				cleanup = true
 			}
 		}
@@ -121,6 +121,125 @@ func (c *gceCloud) RemoveInstanceGroup(groupName string) error {
 	return nil
 }
 
-func zonifyName(zone string, name string) string {
+func (c *gceCloud) AddInstancesToInstanceGroup(instanceNames []string, groupName string) error {
+	glog.Infof("Adding %d instances into instance group [%s]", len(instanceNames), groupName)
+
+	// since instance names are globally unique, we just need to care about matching provided
+	// instance names to each zone.
+	// let's do it on a per-zone basis.
+	// remember instance names were zonified before added to instance group.
+	for _, zone := range c.zones {
+		// instance group name for this zone
+		finalGroupName := zonify(zone, groupName)
+
+		// get all instances in zone
+		zoneInstances, err := c.client.ListInstancesInZone(zone)
+		if err != nil {
+			return err
+		}
+
+		// get all instances in group
+		groupInstances, err := c.client.ListInstancesInInstanceGroupForZone(finalGroupName, zone)
+		if err != nil {
+			return err
+		}
+
+		var instancesToAddtoZone []string
+
+		// for each instance, un-zonify its name so we can compare against provided instanceNames
+		for _, zoneInstance := range zoneInstances.Items {
+			// for each instanceName, if equals to unzonified name, add to group
+			for _, instanceName := range instanceNames {
+				if instanceName == zoneInstance.Name {
+					// is instance already added to instance group?
+					ignoreOp := false
+					for _, groupInstance := range groupInstances.Items {
+						// groupInstance.Instance is an instance URL, so replace is needed here
+						split := strings.Split(groupInstance.Instance, "/")
+						if split[len(split)-1] == zoneInstance.Name {
+							ignoreOp = true
+						}
+					}
+					if !ignoreOp {
+						// use real instance name, meaning the zonified
+						instancesToAddtoZone = append(instancesToAddtoZone, zoneInstance.Name)
+					}
+				}
+			}
+		}
+
+		// are there any instances to add for this zone?
+		total := len(instancesToAddtoZone)
+		if total > 0 {
+			glog.Infof("There are %d instances to add to instance group [%s] on zone [%s]. Adding..", total, groupName, zone)
+			if err := c.client.AddInstancesToInstanceGroup(finalGroupName, instancesToAddtoZone, zone); err != nil {
+				return err
+			}
+		} else {
+			glog.Infof("There are no instances to add to instance group [%s] on zone [%s].", groupName, zone)
+		}
+	}
+
+	glog.Infof("Added %d instances into instance group [%s]", len(instanceNames), groupName)
+
+	return nil
+}
+
+func (c *gceCloud) RemoveInstancesFromInstanceGroup(instanceNames []string, groupName string) error {
+	glog.Infof("Removing %d instances from instance group [%s]", len(instanceNames), groupName)
+
+	// since instance names are globally unique, we just need to care about matching provided
+	// instance names to each zone.
+	// let's do it on a per-zone basis.
+	// remember instance names were zonified before added to instance group.
+	for _, zone := range c.zones {
+		// instance group name for this zone
+		finalGroupName := zonify(zone, groupName)
+
+		// get all instances in group
+		groupInstances, err := c.client.ListInstancesInInstanceGroupForZone(finalGroupName, zone)
+		if err != nil {
+			return err
+		}
+
+		var instancesToRemoveFromZone []string
+
+		// for each instance in group compare against provided instanceNames
+		for _, groupInstance := range groupInstances.Items {
+			// compare with provided instanceNames
+			for _, instanceName := range instanceNames {
+				// groupInstance.Instance is an instance URL, so replace is needed here
+				split := strings.Split(groupInstance.Instance, "/")
+				if instanceName == split[len(split)-1] {
+					// use real instance name, meaning the zonified
+					instancesToRemoveFromZone = append(instancesToRemoveFromZone, groupInstance.Instance)
+				}
+			}
+		}
+
+		// are there any instances to be removed from this zone?
+		total := len(instancesToRemoveFromZone)
+		if total > 0 {
+			glog.Infof("There are %d instances to be removed from instance group [%s] on zone [%s]. Removing..", total, groupName, zone)
+			if err := c.client.RemoveInstancesFromInstanceGroup(finalGroupName, instancesToRemoveFromZone, zone); err != nil {
+				return err
+			}
+		} else {
+			glog.Infof("There are no instances to be removed from instance group [%s] on zone [%s].", groupName, zone)
+		}
+	}
+
+	return nil
+}
+
+//zonify takes a specified name and prepends a specified zone plus an hyphen
+// e.g. zone == "us-east1-d" && name == "myname", returns "us-east1-d-myname"
+func zonify(zone string, name string) string {
 	return strings.Join([]string{zone, name}, "-")
+}
+
+// unzonify takes a specified supposedly zonified name and removes the zone prefix.
+// e.g. name == "us-east1-d-myname" && zone == "us-east1-d", returns "myname"
+func unzonify(name string, zone string) string {
+	return strings.TrimPrefix(name, zone)
 }

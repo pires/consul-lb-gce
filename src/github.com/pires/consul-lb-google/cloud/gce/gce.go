@@ -27,11 +27,10 @@ const (
 )
 
 var (
-	// errors
-	Err_InstanceNotFound = errors.New("instance not found")
+	ErrInstanceNotFound = errors.New("Instance not found")
 )
 
-// GCECloud is a placeholder for GCE stuff.
+// GCEClient is a placeholder for GCE stuff.
 type GCEClient struct {
 	service    *compute.Service
 	projectID  string
@@ -43,7 +42,7 @@ func gceNetworkURL(project string, network string) string {
 }
 
 // CreateGCECloud creates a new instance of GCECloud.
-func CreateGCECloud(projectID string, network string) (*GCEClient, error) {
+func CreateGCECloud(project string, network string) (*GCEClient, error) {
 	// Use oauth2.NoContext if there isn't a good context to pass in.
 	ctx := context.TODO()
 
@@ -60,63 +59,14 @@ func CreateGCECloud(projectID string, network string) (*GCEClient, error) {
 
 	return &GCEClient{
 		service:    svc,
-		projectID:  projectID,
-		networkURL: gceNetworkURL(projectID, network),
+		projectID:  project,
+		networkURL: gceNetworkURL(project, network),
 	}, nil
 }
 
-func waitForOp(op *compute.Operation, getOperation func(operationName string) (*compute.Operation, error)) error {
-	if op == nil {
-		return fmt.Errorf("operation must not be nil")
-	}
-
-	if opIsDone(op) {
-		return getErrorFromOp(op)
-	}
-
-	opName := op.Name
-	return wait.Poll(operationPollInterval, operationPollTimeoutDuration, func() (bool, error) {
-		pollOp, err := getOperation(opName)
-		if err != nil {
-			glog.Warningf("GCE poll operation failed: %v", err)
-		}
-		return opIsDone(pollOp), getErrorFromOp(pollOp)
-	})
-}
-
-func opIsDone(op *compute.Operation) bool {
-	return op != nil && op.Status == "DONE"
-}
-
-func getErrorFromOp(op *compute.Operation) error {
-	if op != nil && op.Error != nil && len(op.Error.Errors) > 0 {
-		err := &googleapi.Error{
-			Code:    int(op.HttpErrorStatusCode),
-			Message: op.Error.Errors[0].Message,
-		}
-		glog.Errorf("GCE operation failed: %v", err)
-		return err
-	}
-
-	return nil
-}
-
-func (gce *GCEClient) waitForGlobalOp(op *compute.Operation) error {
-	return waitForOp(op, func(operationName string) (*compute.Operation, error) {
-		return gce.service.GlobalOperations.Get(gce.projectID, operationName).Do()
-	})
-}
-
-func (gce *GCEClient) waitForRegionOp(op *compute.Operation, region string) error {
-	return waitForOp(op, func(operationName string) (*compute.Operation, error) {
-		return gce.service.RegionOperations.Get(gce.projectID, region, operationName).Do()
-	})
-}
-
-func (gce *GCEClient) waitForZoneOp(op *compute.Operation, zone string) error {
-	return waitForOp(op, func(operationName string) (*compute.Operation, error) {
-		return gce.service.ZoneOperations.Get(gce.projectID, zone, operationName).Do()
-	})
+// ListInstancesInZone returns all instances in a zone
+func (gce *GCEClient) ListInstancesInZone(zone string) (*compute.InstanceList, error) {
+	return gce.service.Instances.List(gce.projectID, zone).Do()
 }
 
 // CreateInstanceGroupForZone creates an instance group with the given instances for the given zone.
@@ -130,10 +80,13 @@ func (gce *GCEClient) CreateInstanceGroupForZone(name string, zone string, ports
 		})
 	}
 
-	op, err := gce.service.InstanceGroups.Insert(gce.projectID, zone, &compute.InstanceGroup{
+	// define InstanceGroup
+	ig := &compute.InstanceGroup{
 		Name:       name,
 		NamedPorts: namedPorts,
-		Network:    gce.networkURL}).Do()
+		Network:    gce.networkURL}
+
+	op, err := gce.service.InstanceGroups.Insert(gce.projectID, zone, ig).Do()
 	if err != nil {
 		return err
 	}
@@ -158,11 +111,11 @@ func (gce *GCEClient) ListInstanceGroupsForZone(zone string) (*compute.InstanceG
 	return gce.service.InstanceGroups.List(gce.projectID, zone).Do()
 }
 
-// ListInstancesInInstanceGroupForZone lists all the instances in a given instance group and state for the given zone.
-func (gce *GCEClient) ListInstancesInInstanceGroupForZone(name string, state string, zone string) (*compute.InstanceGroupsListInstances, error) {
+// ListInstancesInInstanceGroupForZone lists all the instances in a given instance group for the given zone.
+func (gce *GCEClient) ListInstancesInInstanceGroupForZone(name string, zone string) (*compute.InstanceGroupsListInstances, error) {
 	return gce.service.InstanceGroups.ListInstances(
 		gce.projectID, zone, name,
-		&compute.InstanceGroupsListInstancesRequest{InstanceState: state}).Do()
+		&compute.InstanceGroupsListInstancesRequest{}).Do()
 }
 
 // AddInstancesToInstanceGroupForZone adds the given instances to the given instance group for the given zone.
@@ -185,28 +138,6 @@ func (gce *GCEClient) AddInstancesToInstanceGroup(name string, instanceNames []s
 		return err
 	}
 	return gce.waitForZoneOp(op, zone)
-}
-
-// Take a GCE instance 'hostname' and break it down to something that can be fed
-// to the GCE API client library.  Basically this means reducing 'kubernetes-
-// minion-2.c.my-proj.internal' to 'kubernetes-minion-2' if necessary.
-func canonicalizeInstanceName(name string) string {
-	ix := strings.Index(name, ".")
-	if ix != -1 {
-		name = name[:ix]
-	}
-	return name
-}
-
-func makeHostURL(projectID, zone, host string) string {
-	host = canonicalizeInstanceName(host)
-	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/instances/%s",
-		projectID, zone, host)
-}
-
-func isHTTPErrorCode(err error, code int) bool {
-	apiErr, ok := err.(*googleapi.Error)
-	return ok && apiErr.Code == code
 }
 
 // RemoveInstancesFromInstanceGroupForZone removes the given instances from the instance group for the given zone.
@@ -233,8 +164,6 @@ func (gce *GCEClient) RemoveInstancesFromInstanceGroup(name string, instanceName
 	}
 	return gce.waitForZoneOp(op, zone)
 }
-
-// TODO remove port
 
 // AddPortToInstanceGroupForZone adds a port to the given instance group for the given zone.
 func (gce *GCEClient) AddPortToInstanceGroupForZone(ig *compute.InstanceGroup, port int64, zone string) (*compute.NamedPort, error) {
@@ -265,18 +194,9 @@ func (gce *GCEClient) GetInstanceGroupForZone(name string, zone string) (*comput
 	return gce.service.InstanceGroups.Get(gce.projectID, zone, name).Do()
 }
 
-// Return the instances matching the relevant name and zone
-func (gce *GCEClient) getInstanceByNameAndZone(name string, zone string) (*compute.Instance, error) {
-	name = canonicalizeInstanceName(name)
-	res, err := gce.service.Instances.Get(gce.projectID, zone, name).Do()
-	if err != nil {
-		glog.Errorf("Failed to retrieve TargetInstance resource for instance: %s", name)
-		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == http.StatusNotFound {
-			return nil, Err_InstanceNotFound
-		}
-		return nil, err
-	}
-	return res, nil
+// GetAvailableZones returns all available zones for this project
+func (gce *GCEClient) GetAvailableZones() (*compute.ZoneList, error) {
+	return gce.service.Zones.List(gce.projectID).Do()
 }
 
 func createLoadBalancer() {
@@ -342,6 +262,92 @@ func createLoadBalancer() {
 
 }
 
-func (gce *GCEClient) GetAvailableZones() (*compute.ZoneList, error) {
-	return gce.service.Zones.List(gce.projectID).Do()
+// Return the instances matching the relevant name and zone
+func (gce *GCEClient) getInstanceByNameAndZone(name string, zone string) (*compute.Instance, error) {
+	name = canonicalizeInstanceName(name)
+	res, err := gce.service.Instances.Get(gce.projectID, zone, name).Do()
+	if err != nil {
+		glog.Errorf("Failed to retrieve TargetInstance resource for instance: %s", name)
+		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == http.StatusNotFound {
+			return nil, ErrInstanceNotFound
+		}
+		return nil, err
+	}
+	return res, nil
+}
+
+// Take a GCE instance 'hostname' and break it down to something that can be fed
+// to the GCE API client library.  Basically this means reducing 'kubernetes-
+// minion-2.c.my-proj.internal' to 'kubernetes-minion-2' if necessary.
+func canonicalizeInstanceName(name string) string {
+	ix := strings.Index(name, ".")
+	if ix != -1 {
+		name = name[:ix]
+	}
+	return name
+}
+
+func makeHostURL(projectID, zone, host string) string {
+	host = canonicalizeInstanceName(host)
+	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/instances/%s",
+		projectID, zone, host)
+}
+
+func isHTTPErrorCode(err error, code int) bool {
+	apiErr, ok := err.(*googleapi.Error)
+	return ok && apiErr.Code == code
+}
+
+func waitForOp(op *compute.Operation, getOperation func(operationName string) (*compute.Operation, error)) error {
+	if op == nil {
+		return fmt.Errorf("operation must not be nil")
+	}
+
+	if opIsDone(op) {
+		return getErrorFromOp(op)
+	}
+
+	opName := op.Name
+	return wait.Poll(operationPollInterval, operationPollTimeoutDuration, func() (bool, error) {
+		pollOp, err := getOperation(opName)
+		if err != nil {
+			glog.Warningf("GCE poll operation failed: %v", err)
+		}
+		return opIsDone(pollOp), getErrorFromOp(pollOp)
+	})
+}
+
+func opIsDone(op *compute.Operation) bool {
+	return op != nil && op.Status == "DONE"
+}
+
+func getErrorFromOp(op *compute.Operation) error {
+	if op != nil && op.Error != nil && len(op.Error.Errors) > 0 {
+		err := &googleapi.Error{
+			Code:    int(op.HttpErrorStatusCode),
+			Message: op.Error.Errors[0].Message,
+		}
+		glog.Errorf("GCE operation failed: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+func (gce *GCEClient) waitForGlobalOp(op *compute.Operation) error {
+	return waitForOp(op, func(operationName string) (*compute.Operation, error) {
+		return gce.service.GlobalOperations.Get(gce.projectID, operationName).Do()
+	})
+}
+
+func (gce *GCEClient) waitForRegionOp(op *compute.Operation, region string) error {
+	return waitForOp(op, func(operationName string) (*compute.Operation, error) {
+		return gce.service.RegionOperations.Get(gce.projectID, region, operationName).Do()
+	})
+}
+
+func (gce *GCEClient) waitForZoneOp(op *compute.Operation, zone string) error {
+	return waitForOp(op, func(operationName string) (*compute.Operation, error) {
+		return gce.service.ZoneOperations.Get(gce.projectID, zone, operationName).Do()
+	})
 }

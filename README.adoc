@@ -65,12 +65,23 @@ nomad run web.hcl
 
 Looking at the load-balancer manager terminal window, one should see something like:
 ```
-I1216 22:24:01.046739   27337 main.go:110] Watching service [web].
-I1216 22:24:01.046767   27337 cloud.go:81] Creating instance groups for [web]..
-I1216 22:24:13.647723   27337 cloud.go:85] Created instance group [asia-east1-c-web] in zone [asia-east1-c].
-I1216 22:24:25.731770   27337 cloud.go:85] Created instance group [europe-west1-d-web] in zone [europe-west1-d].
-I1216 22:24:54.095646   27337 cloud.go:85] Created instance group [us-east1-d-web] in zone [us-east1-d].
-I1216 22:24:54.095671   27337 cloud.go:104] Creating instance groups for [web] completed successfully
+I1217 21:03:05.030698       1 main.go:44] Starting..
+I1217 21:03:05.031059       1 main.go:53] Initializing cloud client [Project ID: gcp-tests-1159, Network: nomad-network, Allowed Zones: []string{"us-east1-d", "europe-west1-d", "asia-east1-c"}]..
+I1217 21:03:05.031232       1 main.go:60] Connecting to Consul at consul.service.consul:8500..
+I1217 21:03:05.031260       1 main.go:68] Initiating registry..
+I1217 21:03:05.031270       1 main.go:75] Waiting for service updates..
+I1217 21:04:09.408929       1 main.go:129] Watching service [web].
+I1217 21:04:09.408951       1 cloud.go:70] Creating instance groups for [web]..
+I1217 21:04:09.408970       1 cloud.go:73] Creating instance group [us-east1-d-web] in zone [us-east1-d].
+I1217 21:04:13.338217       1 cloud.go:73] Creating instance group [europe-west1-d-web] in zone [europe-west1-d].
+I1217 21:04:16.964163       1 cloud.go:73] Creating instance group [asia-east1-c-web] in zone [asia-east1-c].
+I1217 21:04:20.966326       1 cloud.go:93] Created instance groups for [web] successfully
+W1217 21:04:20.966353       1 main.go:186] Creating instance [client-us-01.c.gcp-tests-1159.internal].
+I1217 21:04:20.966587       1 cloud.go:125] Adding 1 instances into instance group [web]
+I1217 21:04:21.654564       1 cloud.go:174] There are 1 instances to add to instance group [web] on zone [us-east1-d]. Adding..
+I1217 21:04:22.563552       1 cloud.go:179] There are no instances to add to instance group [web] on zone [europe-west1-d].
+I1217 21:04:22.933097       1 cloud.go:179] There are no instances to add to instance group [web] on zone [asia-east1-c].
+I1217 21:04:22.933128       1 cloud.go:183] Added 1 instances into instance group [web]
 ```
 
 Now, stop it:
@@ -82,10 +93,10 @@ nomad stop web
 Looking again at the load-balancer manager terminal window, one should see something like:
 
 ```
-I1216 22:34:15.000185   27337 main.go:118] Stopped watching service [web].
-I1216 22:34:15.000204   27337 cloud.go:112] Removing instance groups for [web]..
-W1216 22:34:27.744633   27337 cloud.go:118] Removed instance group [asia-east1-c-web] from zone [asia-east1-c].
-W1216 22:34:39.519136   27337 cloud.go:118] Removed instance group [europe-west1-d-web] from zone [europe-west1-d].
-W1216 22:35:07.492766   27337 cloud.go:118] Removed instance group [us-east1-d-web] from zone [us-east1-d].
-I1216 22:35:07.492786   27337 cloud.go:130] Removing instance groups for [web] completed successfully
+I1217 21:04:37.505539       1 main.go:138] Stopped watching service [web].
+I1217 21:04:37.505552       1 cloud.go:101] Removing instance groups for [web]..
+W1217 21:04:41.147745       1 cloud.go:107] Removed instance group [us-east1-d-web] from zone [us-east1-d].
+W1217 21:04:44.734511       1 cloud.go:107] Removed instance group [europe-west1-d-web] from zone [europe-west1-d].
+W1217 21:04:48.482138       1 cloud.go:107] Removed instance group [asia-east1-c-web] from zone [asia-east1-c].
+I1217 21:04:48.482161       1 cloud.go:119] Removing instance groups for [web] completed successfully
 ```
