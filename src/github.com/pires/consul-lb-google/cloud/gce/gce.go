@@ -503,9 +503,9 @@ func (gce *GCEClient) CreateGlobalForwardingRule(name string, portRange string) 
 	fwdName := makeForwardingRuleName(name)
 	rule := &compute.ForwardingRule{
 		Name:       fwdName,
-		Target:     thp.SelfLink,
-		PortRange:  portRange,
 		IPProtocol: "TCP",
+		PortRange:  "80", // TODO enable portRange
+		Target:     thp.SelfLink,
 	}
 	op, err := gce.service.GlobalForwardingRules.Insert(gce.projectID, rule).Do()
 	if err != nil {
@@ -517,8 +517,8 @@ func (gce *GCEClient) CreateGlobalForwardingRule(name string, portRange string) 
 	return nil
 }
 
-// DeleteGlobalForwardingRule deletes the GlobalForwardingRule by name.
-func (gce *GCEClient) DeleteGlobalForwardingRule(name string) error {
+// RemoveGlobalForwardingRule deletes the GlobalForwardingRule by name.
+func (gce *GCEClient) RemoveGlobalForwardingRule(name string) error {
 	fwdName := makeForwardingRuleName(name)
 	op, err := gce.service.GlobalForwardingRules.Delete(gce.projectID, fwdName).Do()
 	if err != nil {
@@ -576,13 +576,25 @@ func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string, zones
 	}
 	glog.Infof("Created target HTTP proxy with success.")
 
-	// TODO create global fwd rule with target proxy
+	// TODO make the following optional
+	// create global forwarding rule
+	if err := gce.CreateGlobalForwardingRule(name, port); err != nil {
+		return err
+	}
+	glog.Infof("Created global forwarding rule with success.")
 
 	return nil
 
 }
 
 func (gce *GCEClient) RemoveLoadBalancer(name string) error {
+	// TODO make the following optional according to creation
+	// remove global forwarding rule
+	if err := gce.RemoveGlobalForwardingRule(name); err != nil {
+		return err
+	}
+	glog.Infof("Removed global forwarding rule with success.")
+
 	// remove target http proxy
 	if err := gce.RemoveTargetHttpProxy(name); err != nil {
 		return err

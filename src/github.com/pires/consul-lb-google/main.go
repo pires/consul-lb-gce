@@ -140,7 +140,6 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 				lock.Lock()
 				if isRunning {
 					// remove everything
-					// TODO propagate networking changes
 					if err := client.RemoveLoadBalancer(serviceName); err != nil {
 						glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%d]. %s", serviceName, servicePort, err)
 					}
@@ -237,13 +236,13 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 						glog.Errorf("There was an error while setting service [%s] port. %s", serviceName, err)
 					} else {
 						if err := client.SetPortForInstanceGroup(port, serviceName); err != nil {
-							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while setting service [%s] port [%d]. %s", serviceName, currentPort, err)
+							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while setting service [%s] port [%s]. %s", serviceName, currentPort, err)
 						}
 						servicePort = currentPort
 
-						// TODO propagate networking changes
+						// propagate networking changes
 						if err := client.CreateOrUpdateLoadBalancer(serviceName, servicePort); err != nil {
-							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%d]. %s", serviceName, servicePort, err)
+							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%s]. %s", serviceName, servicePort, err)
 						}
 					}
 				}
