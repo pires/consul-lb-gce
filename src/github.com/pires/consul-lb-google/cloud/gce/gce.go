@@ -261,10 +261,16 @@ func (gce *GCEClient) RemoveFirewall(name string) error {
 }
 
 // CreateHttpHealthCheck creates the given HttpHealthCheck.
-func (gce *GCEClient) CreateHttpHealthCheck(name string) error {
+func (gce *GCEClient) CreateHttpHealthCheck(name string, port string) error {
 	hcName := makeHttpHealthCheckName(name)
-	// TODO add port, etc
-	hc := &compute.HttpHealthCheck{Name: hcName}
+	hcPort, err := strconv.ParseInt(port, 10, 64)
+	if err != nil {
+		hcPort = 80
+	}
+	hc := &compute.HttpHealthCheck{
+		Name: hcName,
+		Port: hcPort,
+	}
 	op, err := gce.service.HttpHealthChecks.Insert(gce.projectID, hc).Do()
 	if err != nil {
 		return err
@@ -273,10 +279,16 @@ func (gce *GCEClient) CreateHttpHealthCheck(name string) error {
 }
 
 // UpdateHttpHealthCheck applies the given HttpHealthCheck as an update.
-func (gce *GCEClient) UpdateHttpHealthCheck(name string) error {
+func (gce *GCEClient) UpdateHttpHealthCheck(name string, port string) error {
 	hcName := makeHttpHealthCheckName(name)
-	// TODO add port, etc
-	hc := &compute.HttpHealthCheck{Name: hcName}
+	hcPort, err := strconv.ParseInt(port, 10, 64)
+	if err != nil {
+		hcPort = 80
+	}
+	hc := &compute.HttpHealthCheck{
+		Name: hcName,
+		Port: hcPort,
+	}
 	op, err := gce.service.HttpHealthChecks.Update(gce.projectID, hcName, hc).Do()
 	if err != nil {
 		return err
@@ -341,9 +353,9 @@ func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string) error
 
 	// create or update HTTP health-check
 	// try to update first
-	if err := gce.UpdateHttpHealthCheck(name); err != nil {
+	if err := gce.UpdateHttpHealthCheck(name, port); err != nil {
 		// couldn't update most probably because health-check didn't exist
-		if err := gce.CreateHttpHealthCheck(name); err != nil {
+		if err := gce.CreateHttpHealthCheck(name, port); err != nil {
 			// couldn't update or create
 			return err
 		}
