@@ -242,7 +242,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 						servicePort = currentPort
 
 						// TODO propagate networking changes
-						if err := client.CreateOrUpdateLoadBalancer(servicePort, serviceName); err != nil {
+						if err := client.CreateOrUpdateLoadBalancer(serviceName, servicePort); err != nil {
 							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%d]. %s", serviceName, servicePort, err)
 						}
 					}

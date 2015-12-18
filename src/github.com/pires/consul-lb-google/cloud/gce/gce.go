@@ -204,7 +204,8 @@ func (gce *GCEClient) GetAvailableZones() (*compute.ZoneList, error) {
 
 // CreateFirewall creates a global firewall rule
 func (gce *GCEClient) CreateFirewall(name string, allowedPorts []string) error {
-	firewall, err := gce.makeFirewallObject(name, allowedPorts)
+	fwName := makeFirewallName(name)
+	firewall, err := gce.makeFirewallObject(fwName, allowedPorts)
 	if err != nil {
 		return err
 	}
@@ -223,11 +224,12 @@ func (gce *GCEClient) CreateFirewall(name string, allowedPorts []string) error {
 
 // UpdateFirewall updates a global firewall rule
 func (gce *GCEClient) UpdateFirewall(name string, allowedPorts []string) error {
-	firewall, err := gce.makeFirewallObject(name, allowedPorts)
+	fwName := makeFirewallName(name)
+	firewall, err := gce.makeFirewallObject(fwName, allowedPorts)
 	if err != nil {
 		return err
 	}
-	op, err := gce.service.Firewalls.Update(gce.projectID, makeFirewallName(name), firewall).Do()
+	op, err := gce.service.Firewalls.Update(gce.projectID, fwName, firewall).Do()
 	if err != nil && !isHTTPErrorCode(err, http.StatusConflict) {
 		return err
 	}
@@ -245,7 +247,7 @@ func (gce *GCEClient) RemoveFirewall(name string) error {
 	fwName := makeFirewallName(name)
 	op, err := gce.service.Firewalls.Delete(gce.projectID, fwName).Do()
 	if err != nil && isHTTPErrorCode(err, http.StatusNotFound) {
-		glog.Infof("Firewall %s already deleted. Continuing to delete other resources.", name)
+		glog.Infof("Firewall %s already deleted. Continuing to delete other resources.", fwName)
 	} else if err != nil {
 		glog.Warningf("Failed to delete firewall %s, got error %v", fwName, err)
 		return err
@@ -258,67 +260,120 @@ func (gce *GCEClient) RemoveFirewall(name string) error {
 	return nil
 }
 
-func createLoadBalancer() {
-	/*
+// CreateHttpHealthCheck creates the given HttpHealthCheck.
+func (gce *GCEClient) CreateHttpHealthCheck(name string) error {
+	hcName := makeHttpHealthCheckName(name)
+	// TODO add port, etc
+	hc := &compute.HttpHealthCheck{Name: hcName}
+	op, err := gce.service.HttpHealthChecks.Insert(gce.projectID, hc).Do()
+	if err != nil {
+		return err
+	}
+	return gce.waitForGlobalOp(op)
+}
 
-		// TODO create unmanaged instance group
-		POST https://www.googleapis.com/compute/v1/projects/littlebits-electronics/zones/us-east1-d/instanceGroups
-		{
-		  "name": "ig-web",
-		  "network": "https://www.googleapis.com/compute/v1/projects/littlebits-electronics/global/networks/nomad-network",
-		  "namedPorts": [
-		    {
-		      "name": "http",
-		      "port": 11080
-		    }
-		  ]
+// UpdateHttpHealthCheck applies the given HttpHealthCheck as an update.
+func (gce *GCEClient) UpdateHttpHealthCheck(name string) error {
+	hcName := makeHttpHealthCheckName(name)
+	// TODO add port, etc
+	hc := &compute.HttpHealthCheck{Name: hcName}
+	op, err := gce.service.HttpHealthChecks.Update(gce.projectID, hcName, hc).Do()
+	if err != nil {
+		return err
+	}
+	return gce.waitForGlobalOp(op)
+}
+
+// RemoveHttpHealthCheck deletes the given HttpHealthCheck by name.
+func (gce *GCEClient) RemoveHttpHealthCheck(name string) error {
+	hcName := makeHttpHealthCheckName(name)
+	op, err := gce.service.HttpHealthChecks.Delete(gce.projectID, hcName).Do()
+	if err != nil {
+		if isHTTPErrorCode(err, http.StatusNotFound) {
+			return nil
 		}
+		return err
+	}
+	return gce.waitForGlobalOp(op)
+}
 
-		// TODO add instances to created instance group
-		POST https://www.googleapis.com/compute/v1/projects/littlebits-electronics/zones/us-east1-d/instanceGroups/ig-web/addInstances
-		{
-		  "instances": [
-		    {
-		      "instance": "https://www.googleapis.com/compute/v1/projects/littlebits-electronics/zones/us-east1-d/instances/client-us-01"
-		    }
-		  ]
+// CreateTargetHttpProxy creates and returns a TargetHttpProxy with the given UrlMap.
+func (gce *GCEClient) CreateTargetHttpProxy(urlMap *compute.UrlMap, name string) error {
+	proxy := &compute.TargetHttpProxy{
+		Name:   name,
+		UrlMap: urlMap.SelfLink,
+	}
+	op, err := gce.service.TargetHttpProxies.Insert(gce.projectID, proxy).Do()
+	if err != nil {
+		return err
+	}
+	if err = gce.waitForGlobalOp(op); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// RemoveTargetHttpProxy removes the TargetHttpProxy by name.
+func (gce *GCEClient) RemoveTargetHttpProxy(name string) error {
+	op, err := gce.service.TargetHttpProxies.Delete(gce.projectID, name).Do()
+	if err != nil {
+		if isHTTPErrorCode(err, http.StatusNotFound) {
+			return nil
 		}
+		return err
+	}
 
-		// TODO create firewall rule to allow service traffic to instances
-		POST https://www.googleapis.com/compute/v1/projects/littlebits-electronics/global/firewalls
-		{
-		  "kind": "compute#firewall",
-		  "name": "web-http2",
-		  "allowed": [
-		    {
-		      "IPProtocol": "tcp",
-		      "ports": [
-			"11080"
-		      ]
-		    }
-		  ],
-		  "network": "https://www.googleapis.com/compute/v1/projects/littlebits-electronics/global/networks/nomad-network",
-		  "sourceRanges": [
-		    "130.211.0.0/22"
-		  ]
+	return gce.waitForGlobalOp(op)
+}
+
+func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string) error {
+	// create or update firewall rule
+	// try to update first
+	if err := gce.UpdateFirewall(name, []string{port}); err != nil {
+		// couldn't update most probably because firewall didn't exist
+		if err := gce.CreateFirewall(name, []string{port}); err != nil {
+			// couldn't update or create
+			return err
 		}
+	}
+	glog.Infof("Created/updated firewall rule with success.")
 
-		// TODO create load-balancer
-
-		// TODO create global forwarding rule for HTTP
-		POST https://www.googleapis.com/compute/beta/projects/littlebits-electronics/global/forwardingRules
-		{
-		  "kind": "compute#forwardingRule",
-		  "IPProtocol": "TCP",
-		  "portRange": "80",
-		  "target": "https://www.googleapis.com/compute/beta/projects/littlebits-electronics/global/targetHttpProxies/web-target-1",
-		  "name": "xpto"
+	// create or update HTTP health-check
+	// try to update first
+	if err := gce.UpdateHttpHealthCheck(name); err != nil {
+		// couldn't update most probably because health-check didn't exist
+		if err := gce.CreateHttpHealthCheck(name); err != nil {
+			// couldn't update or create
+			return err
 		}
+	}
+	glog.Infof("Created/updated HTTP health-check with success.")
 
-		// TODO create backend service
+	// TODO create backend services with healthcheck
+	// TODO create urlmap with backend services
+	// TODO create or update target proxy with urlmap
+	// TODO create global fwd rule with target proxy
 
-	*/
+	return nil
 
+}
+
+func (gce *GCEClient) RemoveLoadBalancer(groupName string) error {
+
+	// remove firewall rule
+	if err := gce.RemoveFirewall(groupName); err != nil {
+		return err
+	}
+	glog.Infof("Removed firewall rule with success")
+
+	// remove HTTP health-check
+	if err := gce.RemoveHttpHealthCheck(groupName); err != nil {
+		return err
+	}
+	glog.Infof("Removed HTTP health-check with success")
+
+	return nil
 }
 
 // helper methods
@@ -344,14 +399,26 @@ func makeHostURL(projectID, zone, host string) string {
 		projectID, zone, host)
 }
 
+func makeName(prefix string, name string) string {
+	return strings.Join([]string{prefix, name}, "-")
+}
+
 func makeFirewallName(name string) string {
-	return strings.Join([]string{name, "fw"}, "-")
+	return makeName("fw", name)
+}
+
+func makeHttpHealthCheckName(name string) string {
+	return makeName("http-hc", name)
+}
+
+func makeHttpsHealthCheckName(name string) string {
+	return makeName("https-hc", name)
 }
 
 // makeFirewallObject returns a pre-populated instance of *computeFirewall
 func (gce *GCEClient) makeFirewallObject(name string, allowedPorts []string) (*compute.Firewall, error) {
 	firewall := &compute.Firewall{
-		Name:         makeFirewallName(name),
+		Name:         name,
 		Description:  "Generated by consul-lb-gce",
 		Network:      gce.networkURL,
 		SourceRanges: []string{"130.211.0.0/22"}, // allow load-balancers alone

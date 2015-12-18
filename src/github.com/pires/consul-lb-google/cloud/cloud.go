@@ -33,7 +33,7 @@ type Cloud interface {
 	SetPortForInstanceGroup(port int64, groupName string) error
 
 	// CreateOrUpdateLoadBalancer creates a new or updates existing load-balancer related to an instance group
-	CreateOrUpdateLoadBalancer(port string, groupName string) error
+	CreateOrUpdateLoadBalancer(groupName string, port string) error
 
 	// RemoveLoadBalancer removes an existing load-balancer related to an instance group
 	RemoveLoadBalancer(groupName string) error
@@ -262,40 +262,19 @@ func (c *gceCloud) SetPortForInstanceGroup(port int64, groupName string) error {
 	return nil
 }
 
-func (c *gceCloud) CreateOrUpdateLoadBalancer(port string, groupName string) error {
+func (c *gceCloud) CreateOrUpdateLoadBalancer(groupName string, port string) error {
 	glog.Infof("Creating/updating load-balancer for [%s:%s].", groupName, port)
-
-	// create or update firewall rule
-	// try to update first
-	if err := c.client.UpdateFirewall(groupName, []string{port}); err != nil {
-		// couldn't update most probably because firewall didn't exist
-		if err := c.client.CreateFirewall(groupName, []string{port}); err != nil {
-			// couldn't update or create
-			return err
-		}
-	}
-	glog.Infof("Created/updated firewall rule with success.")
-	// TODO create or update forwarding rule
-	// TODO create if doesn't exist load-balancer rule
-	// TODO create or update backend service
-
-	return nil
-
+	err := c.client.CreateOrUpdateLoadBalancer(groupName, port)
+	glog.Infof("Load-balancer [%s] created successfully.", groupName)
+	return err
 }
 
 func (c *gceCloud) RemoveLoadBalancer(groupName string) error {
 	glog.Infof("Removing load-balancer for [%s].", groupName)
+	err := c.client.RemoveLoadBalancer(groupName)
+	glog.Infof("Load-balancer [%s] removed successfully.", groupName)
 
-	// TODO remove backend service
-	// TODO remove global forwarding rule
-	// TODO remove load-balancer
-	// remove firewall rule
-	if err := c.client.RemoveFirewall(groupName); err != nil {
-		return err
-	}
-	glog.Infof("Removed firewall rule with success")
-
-	return nil
+	return err
 }
 
 //zonify takes a specified name and prepends a specified zone plus an hyphen
