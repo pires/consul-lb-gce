@@ -264,7 +264,7 @@ func (c *gceCloud) SetPortForInstanceGroup(port int64, groupName string) error {
 
 func (c *gceCloud) CreateOrUpdateLoadBalancer(groupName string, port string) error {
 	glog.Infof("Creating/updating load-balancer for [%s:%s].", groupName, port)
-	err := c.client.CreateOrUpdateLoadBalancer(groupName, port)
+	err := c.client.CreateOrUpdateLoadBalancer(groupName, port, c.zones)
 	glog.Infof("Load-balancer [%s] created successfully.", groupName)
 	return err
 }

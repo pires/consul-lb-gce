@@ -13,6 +13,7 @@ import (
 	compute "google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
 	"k8s.io/kubernetes/pkg/util/wait"
+	"strconv"
 )
 
 const (
@@ -24,6 +25,8 @@ const (
 
 	operationPollInterval        = 3 * time.Second
 	operationPollTimeoutDuration = 30 * time.Minute
+
+	servicePort = "service-port"
 )
 
 var (
@@ -178,7 +181,7 @@ func (gce *GCEClient) RemoveInstancesFromInstanceGroup(name string, instanceName
 // SetPortToInstanceGroupForZone makes sure there's one single port to the given instance group for the given zone.
 func (gce *GCEClient) SetPortToInstanceGroupForZone(name string, port int64, zone string) error {
 	var namedPorts []*compute.NamedPort
-	namedPorts = append(namedPorts, &compute.NamedPort{Name: "service-port", Port: port})
+	namedPorts = append(namedPorts, &compute.NamedPort{Name: servicePort, Port: port})
 	op, err := gce.service.InstanceGroups.SetNamedPorts(
 		gce.projectID, zone, name,
 		&compute.InstanceGroupsSetNamedPortsRequest{
@@ -260,6 +263,12 @@ func (gce *GCEClient) RemoveFirewall(name string) error {
 	return nil
 }
 
+// GetHttpHealthCheck returns the given HttpHealthCheck by name.
+func (gce *GCEClient) GetHttpHealthCheck(name string) (*compute.HttpHealthCheck, error) {
+	hcName := makeHttpHealthCheckName(name)
+	return gce.service.HttpHealthChecks.Get(gce.projectID, hcName).Do()
+}
+
 // CreateHttpHealthCheck creates the given HttpHealthCheck.
 func (gce *GCEClient) CreateHttpHealthCheck(name string, port string) error {
 	hcName := makeHttpHealthCheckName(name)
@@ -309,6 +318,93 @@ func (gce *GCEClient) RemoveHttpHealthCheck(name string) error {
 	return gce.waitForGlobalOp(op)
 }
 
+//zonify takes a specified name and prepends a specified zone plus an hyphen
+// e.g. zone == "us-east1-d" && name == "myname", returns "us-east1-d-myname"
+func zonify(zone string, name string) string {
+	return strings.Join([]string{zone, name}, "-")
+}
+
+// CreateBackendService creates the given BackendService.
+func (gce *GCEClient) CreateBackendService(name string, zones []string) error {
+	bsName := makeBackendServiceName(name)
+
+	// prepare backends
+	var backends []*compute.Backend
+	// one backend (instance group) per zone
+	for _, zone := range zones {
+		// instance groups have been previously zonified
+		ig, _ := gce.GetInstanceGroupForZone(zonify(zone, name), zone)
+		backends = append(backends, &compute.Backend{
+			Description: zone,
+			Group:       ig.SelfLink,
+		})
+	}
+
+	hc, _ := gce.GetHttpHealthCheck(name)
+
+	// prepare backend service
+	bs := &compute.BackendService{
+		Backends:     backends,
+		HealthChecks: []string{hc.SelfLink},
+		Name:         bsName,
+		PortName:     servicePort,
+		Protocol:     "HTTP",
+	}
+	op, err := gce.service.BackendServices.Insert(gce.projectID, bs).Do()
+	if err != nil {
+		return err
+	}
+	return gce.waitForGlobalOp(op)
+}
+
+// UpdateBackendService applies the given BackendService as an update to an existing service.
+func (gce *GCEClient) UpdateBackendService(name string, zones []string) error {
+	// TODO
+	bsName := makeBackendServiceName(name)
+
+	// prepare backends
+	var backends []*compute.Backend
+	// one backend (instance group) per zone
+	for _, zone := range zones {
+		// instance groups have been previously zonified
+		ig, _ := gce.GetInstanceGroupForZone(zonify(zone, name), zone)
+		backends = append(backends, &compute.Backend{
+			Description: zone,
+			Group:       ig.SelfLink,
+		})
+	}
+
+	hc, _ := gce.GetHttpHealthCheck(name)
+
+	// prepare backend service
+	bs := &compute.BackendService{
+		Backends:     backends,
+		HealthChecks: []string{hc.SelfLink},
+		Name:         bsName,
+		PortName:     servicePort,
+		Protocol:     "HTTP",
+	}
+
+	op, err := gce.service.BackendServices.Update(gce.projectID, bsName, bs).Do()
+	if err != nil {
+		return err
+	}
+	return gce.waitForGlobalOp(op)
+}
+
+// RemoveBackendService deletes the given BackendService by name.
+func (gce *GCEClient) RemoveBackendService(name string) error {
+	bsName := makeBackendServiceName(name)
+	op, err := gce.service.BackendServices.Delete(gce.projectID, bsName).Do()
+	if err != nil {
+		if isHTTPErrorCode(err, http.StatusNotFound) {
+			return nil
+		}
+		return err
+	}
+	return gce.waitForGlobalOp(op)
+}
+
 // CreateTargetHttpProxy creates and returns a TargetHttpProxy with the given UrlMap.
 func (gce *GCEClient) CreateTargetHttpProxy(urlMap *compute.UrlMap, name string) error {
 	proxy := &compute.TargetHttpProxy{
@@ -339,7 +435,7 @@ func (gce *GCEClient) RemoveTargetHttpProxy(name string) error {
 	return gce.waitForGlobalOp(op)
 }
 
-func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string) error {
+func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string, zones []string) error {
 	// create or update firewall rule
 	// try to update first
 	if err := gce.UpdateFirewall(name, []string{port}); err != nil {
@@ -362,7 +458,17 @@ func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string) error
 	}
 	glog.Infof("Created/updated HTTP health-check with success.")
 
-	// TODO create backend services with healthcheck
+	// create or update backend service, only for allowed zones
+	// try to update first
+	if err := gce.UpdateBackendService(name, zones); err != nil {
+		// couldn't update most probably because backend service didn't exist
+		if err := gce.CreateBackendService(name, zones); err != nil {
+			// couldn't update or create
+			return err
+		}
+	}
+	glog.Infof("Created/updated backend service with success.")
+
 	// TODO create urlmap with backend services
 	// TODO create or update target proxy with urlmap
 	// TODO create global fwd rule with target proxy
@@ -371,19 +477,25 @@ func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string) error
 
 }
 
-func (gce *GCEClient) RemoveLoadBalancer(groupName string) error {
+func (gce *GCEClient) RemoveLoadBalancer(name string) error {
 
-	// remove firewall rule
-	if err := gce.RemoveFirewall(groupName); err != nil {
+	// remove backend service
+	if err := gce.RemoveBackendService(name); err != nil {
 		return err
 	}
-	glog.Infof("Removed firewall rule with success")
+	glog.Infof("Removed backend service with success.")
 
 	// remove HTTP health-check
-	if err := gce.RemoveHttpHealthCheck(groupName); err != nil {
+	if err := gce.RemoveHttpHealthCheck(name); err != nil {
 		return err
 	}
-	glog.Infof("Removed HTTP health-check with success")
+	glog.Infof("Removed HTTP health-check with success.")
+
+	// remove firewall rule
+	if err := gce.RemoveFirewall(name); err != nil {
+		return err
+	}
+	glog.Infof("Removed firewall rule with success.")
 
 	return nil
 }
@@ -421,6 +533,10 @@ func makeFirewallName(name string) string {
 
 func makeHttpHealthCheckName(name string) string {
 	return makeName("http-hc", name)
+}
+
+func makeBackendServiceName(name string) string {
+	return makeName("backend", name)
 }
 
 func makeHttpsHealthCheckName(name string) string {
