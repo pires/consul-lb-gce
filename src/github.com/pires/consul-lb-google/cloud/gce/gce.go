@@ -205,6 +205,8 @@ func (gce *GCEClient) GetAvailableZones() (*compute.ZoneList, error) {
 	return gce.service.Zones.List(gce.projectID).Do()
 }
 
+// Firewall rules management
+
 // CreateFirewall creates a global firewall rule
 func (gce *GCEClient) CreateFirewall(name string, allowedPorts []string) error {
 	fwName := makeFirewallName(name)
@@ -263,6 +265,8 @@ func (gce *GCEClient) RemoveFirewall(name string) error {
 	return nil
 }
 
+// HttpHealthCheck Management
+
 // GetHttpHealthCheck returns the given HttpHealthCheck by name.
 func (gce *GCEClient) GetHttpHealthCheck(name string) (*compute.HttpHealthCheck, error) {
 	hcName := makeHttpHealthCheckName(name)
@@ -318,6 +322,14 @@ func (gce *GCEClient) RemoveHttpHealthCheck(name string) error {
 	return gce.waitForGlobalOp(op)
 }
 
+// BackendService Management
+
+// GetBackendService retrieves a backend by name.
+func (gce *GCEClient) GetBackendService(name string) (*compute.BackendService, error) {
+	bsName := makeBackendServiceName(name)
+	return gce.service.BackendServices.Get(gce.projectID, bsName).Do()
+}
+
 //zonify takes a specified name and prepends a specified zone plus an hyphen
 // e.g. zone == "us-east1-d" && name == "myname", returns "us-east1-d-myname"
 func zonify(zone string, name string) string {
@@ -359,7 +371,6 @@ func (gce *GCEClient) CreateBackendService(name string, zones []string) error {
 
 // UpdateBackendService applies the given BackendService as an update to an existing service.
 func (gce *GCEClient) UpdateBackendService(name string, zones []string) error {
-	// TODO
 	bsName := makeBackendServiceName(name)
 
 	// prepare backends
@@ -396,6 +407,42 @@ func (gce *GCEClient) UpdateBackendService(name string, zones []string) error {
 func (gce *GCEClient) RemoveBackendService(name string) error {
 	bsName := makeBackendServiceName(name)
 	op, err := gce.service.BackendServices.Delete(gce.projectID, bsName).Do()
+	if err != nil {
+		if isHTTPErrorCode(err, http.StatusNotFound) {
+			return nil
+		}
+		return err
+	}
+	return gce.waitForGlobalOp(op)
+}
+
+// UrlMap management
+
+// GetUrlMap returns the UrlMap by name.
+func (gce *GCEClient) GetUrlMap(name string) (*compute.UrlMap, error) {
+	return gce.service.UrlMaps.Get(gce.projectID, name).Do()
+}
+
+// CreateUrlMap creates an url map, using the given backend service as the default service.
+func (gce *GCEClient) CreateUrlMap(name string) error {
+	backend, _ := gce.GetBackendService(name)
+	urlMap := &compute.UrlMap{
+		Name:           name,
+		DefaultService: backend.SelfLink,
+	}
+	op, err := gce.service.UrlMaps.Insert(gce.projectID, urlMap).Do()
+	if err != nil {
+		return err
+	}
+	if err = gce.waitForGlobalOp(op); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RemoveUrlMap deletes a url map by name.
+func (gce *GCEClient) RemoveUrlMap(name string) error {
+	op, err := gce.service.UrlMaps.Delete(gce.projectID, name).Do()
 	if err != nil {
 		if isHTTPErrorCode(err, http.StatusNotFound) {
 			return nil
@@ -469,7 +516,12 @@ func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string, zones
 	}
 	glog.Infof("Created/updated backend service with success.")
 
-	// TODO create urlmap with backend services
+	// create url map
+	if err := gce.CreateUrlMap(name); err != nil {
+		return err
+	}
+	glog.Infof("Created URL map with success.")
+
 	// TODO create or update target proxy with urlmap
 	// TODO create global fwd rule with target proxy
 
@@ -478,6 +530,11 @@ func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string, zones
 }
 
 func (gce *GCEClient) RemoveLoadBalancer(name string) error {
+	// remove url map
+	if err := gce.RemoveUrlMap(name); err != nil {
+		return err
+	}
+	glog.Infof("Removed URL map with success.")
 
 	// remove backend service
 	if err := gce.RemoveBackendService(name); err != nil {
