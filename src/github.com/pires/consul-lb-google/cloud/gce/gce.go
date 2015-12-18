@@ -363,6 +363,7 @@ func (gce *GCEClient) CreateBackendService(name string, zones []string) error {
 		Name:         bsName,
 		PortName:     servicePort,
 		Protocol:     "HTTP",
+		TimeoutSec:   10, // TODO make configurable
 	}
 	op, err := gce.service.BackendServices.Insert(gce.projectID, bs).Do()
 	if err != nil {
