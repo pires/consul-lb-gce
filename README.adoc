@@ -16,6 +16,7 @@ toc::[]
 * `make`
 * Some Go tools
 ** http://getgb.io[`gb`] - `go get -u github.com/constabulary/gb/...`
+* A running Nomad cluster with Consul integration on Google Compute Engine
 
 ## Development
 
@@ -28,14 +29,7 @@ make all
 
 ### Test
 
-To test this locally, you'll need https://github.com/pires/nomad-vagrant-coreos-cluster[a Nomad cluster with Consul integration].
-Clone the repo and run:
-
-```
-vagrant up
-```
-
-You should have one server and two clients running.
+**Attention:** Testing locally is not supported, but if you're feeling adventurous, take a look at https://github.com/pires/nomad-vagrant-coreos-cluster[this Nomad cluster with Consul integration].
 
 Now, before deploying the `nginx` service example, let's compile and run the load-balancer manager. On another terminal window, execute:
 
@@ -50,11 +44,11 @@ GOOGLE_APPLICATION_CREDENTIALS=~/Work/gce/my-project-1234567890.json bin/consul-
 
 You should see something like:
 ```
-I1216 22:06:42.966122   27247 main.go:31] Starting..
-I1216 22:06:42.972679   27247 main.go:34] Initializing cloud client [Project ID: my-project-id, Network: my-network, Allowed Zones: []string{"us-east1-d", "europe-west1-d", "asia-east1-c"}]..
-I1216 22:06:44.598845   27247 main.go:41] Connecting to Consul at 172.17.9.100:8500..
-I1216 22:06:44.600071   27247 main.go:49] Initiating registry..
-I1216 22:06:44.600086   27247 main.go:56] Waiting for service updates..
+I1218 16:20:36.877575       1 main.go:45] Starting..
+I1218 16:20:36.877909       1 main.go:54] Initializing cloud client [Project ID: my-project, Network: my-network, Allowed Zones: []string{"us-east1-d", "europe-west1-d", "asia-east1-c"}]..
+I1218 16:20:36.878178       1 main.go:61] Connecting to Consul at consul.service.consul:8500..
+I1218 16:20:36.878198       1 main.go:69] Initiating registry..
+I1218 16:20:36.878214       1 main.go:76] Waiting for service updates..
 ```
 
 Deploy the `nginx` example:
@@ -65,24 +59,32 @@ nomad run web.hcl
 
 Looking at the load-balancer manager terminal window, one should see something like:
 ```
-I1217 21:03:05.030698       1 main.go:44] Starting..
-I1217 21:03:05.031059       1 main.go:53] Initializing cloud client [Project ID: my-project-id, Network: nomad-network, Allowed Zones: []string{"us-east1-d", "europe-west1-d", "asia-east1-c"}]..
-I1217 21:03:05.031232       1 main.go:60] Connecting to Consul at consul.service.consul:8500..
-I1217 21:03:05.031260       1 main.go:68] Initiating registry..
-I1217 21:03:05.031270       1 main.go:75] Waiting for service updates..
-I1217 21:04:09.408929       1 main.go:129] Watching service [web].
-I1217 21:04:09.408951       1 cloud.go:70] Creating instance groups for [web]..
-I1217 21:04:09.408970       1 cloud.go:73] Creating instance group [us-east1-d-web] in zone [us-east1-d].
-I1217 21:04:13.338217       1 cloud.go:73] Creating instance group [europe-west1-d-web] in zone [europe-west1-d].
-I1217 21:04:16.964163       1 cloud.go:73] Creating instance group [asia-east1-c-web] in zone [asia-east1-c].
-I1217 21:04:20.966326       1 cloud.go:93] Created instance groups for [web] successfully
-W1217 21:04:20.966353       1 main.go:186] Creating instance [client-us-01.c.my-project-id.internal].
-I1217 21:04:20.966587       1 cloud.go:125] Adding 1 instances into instance group [web]
-I1217 21:04:21.654564       1 cloud.go:174] There are 1 instances to add to instance group [web] on zone [us-east1-d]. Adding..
-I1217 21:04:22.563552       1 cloud.go:179] There are no instances to add to instance group [web] on zone [europe-west1-d].
-I1217 21:04:22.933097       1 cloud.go:179] There are no instances to add to instance group [web] on zone [asia-east1-c].
-I1217 21:04:22.933128       1 cloud.go:183] Added 1 instances into instance group [web]
+I1218 16:21:07.931230       1 main.go:129] Initializing service [web]..
+I1218 16:21:07.931263       1 cloud.go:78] Creating instance groups for [web]..
+I1218 16:21:07.931269       1 cloud.go:81] Creating instance group [us-east1-d-web] in zone [us-east1-d].
+I1218 16:21:11.751202       1 cloud.go:81] Creating instance group [europe-west1-d-web] in zone [europe-west1-d].
+I1218 16:21:15.747546       1 cloud.go:81] Creating instance group [asia-east1-c-web] in zone [asia-east1-c].
+I1218 16:21:19.653728       1 cloud.go:101] Created instance groups for [web] successfully
+I1218 16:21:19.653771       1 main.go:135] Watching service [web].
+W1218 16:21:19.653780       1 main.go:195] Adding instance [client-us-01.c.my-project.internal].
+I1218 16:21:19.654187       1 main.go:203] Service has new port [11080]
+I1218 16:21:19.654217       1 cloud.go:133] Adding 1 instances into instance group [web]
+I1218 16:21:19.963843       1 cloud.go:182] There are 1 instances to add to instance group [web] on zone [us-east1-d]. Adding..
+I1218 16:21:20.764763       1 cloud.go:187] There are no instances to add to instance group [web] on zone [europe-west1-d].
+I1218 16:21:21.049794       1 cloud.go:187] There are no instances to add to instance group [web] on zone [asia-east1-c].
+I1218 16:21:21.049813       1 cloud.go:191] Added 1 instances into instance group [web]
+I1218 16:21:21.049820       1 cloud.go:244] Setting instance group [web] port [11080]..
+I1218 16:21:22.229671       1 cloud.go:266] Creating/updating load-balancer for [web:11080].
+I1218 16:21:53.131003       1 gce.go:546] Created/updated firewall rule with success.
+I1218 16:21:56.995704       1 gce.go:557] Created/updated HTTP health-check with success.
+I1218 16:22:02.429513       1 gce.go:568] Created/updated backend service with success.
+I1218 16:22:06.350711       1 gce.go:574] Created URL map with success.
+I1218 16:22:10.381194       1 gce.go:580] Created target HTTP proxy with success.
+I1218 16:22:17.401182       1 gce.go:587] Created global forwarding rule with success.
+I1218 16:22:17.401215       1 cloud.go:268] Load-balancer [web] created successfully.
 ```
+
+Validate that load-balancing is working alright.
 
 Now, stop it:
 
@@ -93,10 +95,22 @@ nomad stop web
 Looking again at the load-balancer manager terminal window, one should see something like:
 
 ```
-I1217 21:04:37.505539       1 main.go:138] Stopped watching service [web].
-I1217 21:04:37.505552       1 cloud.go:101] Removing instance groups for [web]..
-W1217 21:04:41.147745       1 cloud.go:107] Removed instance group [us-east1-d-web] from zone [us-east1-d].
-W1217 21:04:44.734511       1 cloud.go:107] Removed instance group [europe-west1-d-web] from zone [europe-west1-d].
-W1217 21:04:48.482138       1 cloud.go:107] Removed instance group [asia-east1-c-web] from zone [asia-east1-c].
-I1217 21:04:48.482161       1 cloud.go:119] Removing instance groups for [web] completed successfully
+I1218 16:26:17.601174       1 cloud.go:273] Removing load-balancer for [web].
+I1218 16:26:24.390783       1 gce.go:598] Removed global forwarding rule with success.
+I1218 16:26:28.139698       1 gce.go:604] Removed target HTTP proxy with success.
+I1218 16:26:32.001725       1 gce.go:610] Removed URL map with success.
+I1218 16:26:35.774544       1 gce.go:616] Removed backend service with success.
+I1218 16:26:39.477543       1 gce.go:622] Removed HTTP health-check with success.
+I1218 16:27:07.202854       1 gce.go:628] Removed firewall rule with success.
+I1218 16:27:07.202878       1 cloud.go:275] Load-balancer [web] removed successfully.
+I1218 16:27:07.202886       1 cloud.go:109] Removing instance groups for [web]..
+W1218 16:27:10.853607       1 cloud.go:115] Removed instance group [us-east1-d-web] from zone [us-east1-d].
+W1218 16:27:14.319410       1 cloud.go:115] Removed instance group [europe-west1-d-web] from zone [europe-west1-d].
+W1218 16:27:18.036865       1 cloud.go:115] Removed instance group [asia-east1-c-web] from zone [asia-east1-c].
+I1218 16:27:18.036888       1 cloud.go:127] Removing instance groups for [web] completed successfully
+I1218 16:27:18.036896       1 main.go:149] Stopped watching service [web].
 ```
+
+### Scaling
+
+The manager supports scaling the number of instances of a service as well.
