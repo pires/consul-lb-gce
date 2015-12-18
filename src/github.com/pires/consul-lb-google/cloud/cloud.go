@@ -9,10 +9,10 @@ import (
 )
 
 var (
-	ErrCantCreateInstanceGroup = errors.New("Can't create instance group")
-	ErrCantRemoveInstanceGroup = errors.New("Can't remove instance group")
-	ErrUnknownInstanceGroup = errors.New("Unknown instance group")
-	ErrUnknownInstanceInGroup = errors.New("Unknown instance in instance group")
+	ErrCantCreateInstanceGroup     = errors.New("Can't create instance group")
+	ErrCantRemoveInstanceGroup     = errors.New("Can't remove instance group")
+	ErrUnknownInstanceGroup        = errors.New("Unknown instance group")
+	ErrUnknownInstanceInGroup      = errors.New("Unknown instance in instance group")
 	ErrCantSetPortForInstanceGroup = errors.New("Can't set port for instance group")
 )
 
@@ -31,6 +31,12 @@ type Cloud interface {
 
 	// SetPortForInstanceGroup sets the port on an instance group
 	SetPortForInstanceGroup(port int64, groupName string) error
+
+	// CreateOrUpdateLoadBalancer creates a new or updates existing load-balancer related to an instance group
+	CreateOrUpdateLoadBalancer(port string, groupName string) error
+
+	// RemoveLoadBalancer removes an existing load-balancer related to an instance group
+	RemoveLoadBalancer(groupName string) error
 }
 
 type instanceGroup struct {
@@ -38,8 +44,6 @@ type instanceGroup struct {
 	name string
 	// map of instances in the instance group
 	instances map[string]string
-	// the name of the firewall allow rule related to this instance group
-	fwRule string
 }
 
 type gceCloud struct {
@@ -214,9 +218,9 @@ func (c *gceCloud) RemoveInstancesFromInstanceGroup(instanceNames []string, grou
 			for _, instanceName := range instanceNames {
 				// groupInstance.Instance is an instance URL, so replace is needed here
 				split := strings.Split(groupInstance.Instance, "/")
-				if instanceName == split[len(split) - 1] {
+				if instanceName == split[len(split)-1] {
 					// use real instance name, meaning the zonified
-					instancesToRemoveFromZone = append(instancesToRemoveFromZone, groupInstance.Instance)
+					instancesToRemoveFromZone = append(instancesToRemoveFromZone, instanceName)
 				}
 			}
 		}
@@ -254,6 +258,42 @@ func (c *gceCloud) SetPortForInstanceGroup(port int64, groupName string) error {
 	if !success {
 		return ErrCantSetPortForInstanceGroup
 	}
+
+	return nil
+}
+
+func (c *gceCloud) CreateOrUpdateLoadBalancer(port string, groupName string) error {
+	glog.Infof("Creating/updating load-balancer for [%s:%s].", groupName, port)
+
+	// create or update firewall rule
+	// try to update first
+	if err := c.client.UpdateFirewall(groupName, []string{port}); err != nil {
+		// couldn't update most probably because firewall didn't exist
+		if err := c.client.CreateFirewall(groupName, []string{port}); err != nil {
+			// couldn't update or create
+			return err
+		}
+	}
+	glog.Infof("Created/updated firewall rule with success.")
+	// TODO create or update forwarding rule
+	// TODO create if doesn't exist load-balancer rule
+	// TODO create or update backend service
+
+	return nil
+
+}
+
+func (c *gceCloud) RemoveLoadBalancer(groupName string) error {
+	glog.Infof("Removing load-balancer for [%s].", groupName)
+
+	// TODO remove backend service
+	// TODO remove global forwarding rule
+	// TODO remove load-balancer
+	// remove firewall rule
+	if err := c.client.RemoveFirewall(groupName); err != nil {
+		return err
+	}
+	glog.Infof("Removed firewall rule with success")
 
 	return nil
 }

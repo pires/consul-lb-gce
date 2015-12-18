@@ -139,17 +139,21 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 			case registry.DELETED:
 				lock.Lock()
 				if isRunning {
+					// remove everything
+					// TODO propagate networking changes
+					if err := client.RemoveLoadBalancer(serviceName); err != nil {
+						glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%d]. %s", serviceName, servicePort, err)
+					}
+					if err := client.RemoveInstanceGroup(serviceName); err != nil {
+						glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while removing instance group for service [%s]. %s", serviceName, err)
+					}
+					glog.Infof("Stopped watching service [%s].", serviceName)
 					// reset state
 					serviceName = ""
 					servicePort = ""
 					isRunning = false
 					instances = make(map[string]*registry.ServiceInstance)
-					glog.Infof("Stopped watching service [%s].", serviceName)
 				}
-				// remove everything
-				// do it outside of the conditional block above, just in case there's
-				// stalled stuff in the cloud that should be removed
-				client.RemoveInstanceGroup(update.ServiceName)
 				lock.Unlock()
 			case registry.CHANGED:
 				lock.Lock()
@@ -201,7 +205,6 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 								currentPort = v.Port
 							}
 						} else {
-							glog.Warningf("Probable changes in [%s].", instance)
 							// already exists, compare instance with v
 							if instance.Port != v.Port { // compare port
 								if currentPort != v.Port {
@@ -237,6 +240,11 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while setting service [%s] port [%d]. %s", serviceName, currentPort, err)
 						}
 						servicePort = currentPort
+
+						// TODO propagate networking changes
+						if err := client.CreateOrUpdateLoadBalancer(servicePort, serviceName); err != nil {
+							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%d]. %s", serviceName, servicePort, err)
+						}
 					}
 				}
 
