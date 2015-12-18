@@ -37,10 +37,6 @@ type GCEClient struct {
 	networkURL string
 }
 
-func gceNetworkURL(project string, network string) string {
-	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/global/networks/%s", project, network)
-}
-
 // CreateGCECloud creates a new instance of GCECloud.
 func CreateGCECloud(project string, network string) (*GCEClient, error) {
 	// Use oauth2.NoContext if there isn't a good context to pass in.
@@ -60,7 +56,7 @@ func CreateGCECloud(project string, network string) (*GCEClient, error) {
 	return &GCEClient{
 		service:    svc,
 		projectID:  project,
-		networkURL: gceNetworkURL(project, network),
+		networkURL: makeNetworkURL(project, network),
 	}, nil
 }
 
@@ -118,6 +114,20 @@ func (gce *GCEClient) ListInstancesInInstanceGroupForZone(name string, zone stri
 		&compute.InstanceGroupsListInstancesRequest{}).Do()
 }
 
+// Return the instances matching the relevant name and zone
+func (gce *GCEClient) GetInstanceByNameAndZone(name string, zone string) (*compute.Instance, error) {
+	name = canonicalizeInstanceName(name)
+	res, err := gce.service.Instances.Get(gce.projectID, zone, name).Do()
+	if err != nil {
+		glog.Errorf("Failed to retrieve TargetInstance resource for instance: %s", name)
+		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == http.StatusNotFound {
+			return nil, ErrInstanceNotFound
+		}
+		return nil, err
+	}
+	return res, nil
+}
+
 // AddInstancesToInstanceGroupForZone adds the given instances to the given instance group for the given zone.
 func (gce *GCEClient) AddInstancesToInstanceGroup(name string, instanceNames []string, zone string) error {
 	if len(instanceNames) == 0 {
@@ -165,28 +175,21 @@ func (gce *GCEClient) RemoveInstancesFromInstanceGroup(name string, instanceName
 	return gce.waitForZoneOp(op, zone)
 }
 
-// AddPortToInstanceGroupForZone adds a port to the given instance group for the given zone.
-func (gce *GCEClient) AddPortToInstanceGroupForZone(ig *compute.InstanceGroup, port int64, zone string) (*compute.NamedPort, error) {
-	for _, np := range ig.NamedPorts {
-		if np.Port == port {
-			glog.Infof("Instance group %v already has named port %+v", ig.Name, np)
-			return np, nil
-		}
-	}
-	glog.Infof("Adding port %v to instance group %v with %d ports", port, ig.Name, len(ig.NamedPorts))
-	namedPort := compute.NamedPort{Name: fmt.Sprintf("port%v", port), Port: port}
-	ig.NamedPorts = append(ig.NamedPorts, &namedPort)
+// SetPortToInstanceGroupForZone makes sure there's one single port to the given instance group for the given zone.
+func (gce *GCEClient) SetPortToInstanceGroupForZone(name string, port int64, zone string) error {
+	var namedPorts []*compute.NamedPort
+	namedPorts = append(namedPorts, &compute.NamedPort{Name: "service-port", Port: port})
 	op, err := gce.service.InstanceGroups.SetNamedPorts(
-		gce.projectID, zone, ig.Name,
+		gce.projectID, zone, name,
 		&compute.InstanceGroupsSetNamedPortsRequest{
-			NamedPorts: ig.NamedPorts}).Do()
+			NamedPorts: namedPorts}).Do()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if err = gce.waitForZoneOp(op, zone); err != nil {
-		return nil, err
+		return err
 	}
-	return &namedPort, nil
+	return nil
 }
 
 // GetInstanceGroupForZone returns an instance group by name for zone.
@@ -262,19 +265,7 @@ func createLoadBalancer() {
 
 }
 
-// Return the instances matching the relevant name and zone
-func (gce *GCEClient) getInstanceByNameAndZone(name string, zone string) (*compute.Instance, error) {
-	name = canonicalizeInstanceName(name)
-	res, err := gce.service.Instances.Get(gce.projectID, zone, name).Do()
-	if err != nil {
-		glog.Errorf("Failed to retrieve TargetInstance resource for instance: %s", name)
-		if apiErr, ok := err.(*googleapi.Error); ok && apiErr.Code == http.StatusNotFound {
-			return nil, ErrInstanceNotFound
-		}
-		return nil, err
-	}
-	return res, nil
-}
+// helper methods
 
 // Take a GCE instance 'hostname' and break it down to something that can be fed
 // to the GCE API client library.  Basically this means reducing 'kubernetes-
@@ -285,6 +276,10 @@ func canonicalizeInstanceName(name string) string {
 		name = name[:ix]
 	}
 	return name
+}
+
+func makeNetworkURL(project string, network string) string {
+	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/global/networks/%s", project, network)
 }
 
 func makeHostURL(projectID, zone, host string) string {

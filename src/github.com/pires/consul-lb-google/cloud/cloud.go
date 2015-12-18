@@ -11,8 +11,9 @@ import (
 var (
 	ErrCantCreateInstanceGroup = errors.New("Can't create instance group")
 	ErrCantRemoveInstanceGroup = errors.New("Can't remove instance group")
-	ErrUnknownInstanceGroup    = errors.New("Unknown instance group")
-	ErrUnknownInstanceInGroup  = errors.New("Unknown instance in instance group")
+	ErrUnknownInstanceGroup = errors.New("Unknown instance group")
+	ErrUnknownInstanceInGroup = errors.New("Unknown instance in instance group")
+	ErrCantSetPortForInstanceGroup = errors.New("Can't set port for instance group")
 )
 
 type Cloud interface {
@@ -27,6 +28,9 @@ type Cloud interface {
 
 	// RemoveInstancesFromInstanceGroup removes a set of instances from an instance group
 	RemoveInstancesFromInstanceGroup(instanceNames []string, groupName string) error
+
+	// SetPortForInstanceGroup sets the port on an instance group
+	SetPortForInstanceGroup(port int64, groupName string) error
 }
 
 type instanceGroup struct {
@@ -210,7 +214,7 @@ func (c *gceCloud) RemoveInstancesFromInstanceGroup(instanceNames []string, grou
 			for _, instanceName := range instanceNames {
 				// groupInstance.Instance is an instance URL, so replace is needed here
 				split := strings.Split(groupInstance.Instance, "/")
-				if instanceName == split[len(split)-1] {
+				if instanceName == split[len(split) - 1] {
 					// use real instance name, meaning the zonified
 					instancesToRemoveFromZone = append(instancesToRemoveFromZone, groupInstance.Instance)
 				}
@@ -227,6 +231,28 @@ func (c *gceCloud) RemoveInstancesFromInstanceGroup(instanceNames []string, grou
 		} else {
 			glog.Infof("There are no instances to be removed from instance group [%s] on zone [%s].", groupName, zone)
 		}
+	}
+
+	return nil
+}
+
+func (c *gceCloud) SetPortForInstanceGroup(port int64, groupName string) error {
+	glog.Infof("Setting instance group [%s] port [%d]..", groupName, port)
+
+	success := true
+	for _, zone := range c.zones {
+		// instance group name for this zone
+		finalGroupName := zonify(zone, groupName)
+
+		// get all instances in group
+		if err := c.client.SetPortToInstanceGroupForZone(finalGroupName, port, zone); err != nil {
+			glog.Errorf("There was an error while setting port [%d] for instance group [%s] in zone [%s]. %s", port, finalGroupName, zone, err)
+			success = false
+		}
+	}
+
+	if !success {
+		return ErrCantSetPortForInstanceGroup
 	}
 
 	return nil

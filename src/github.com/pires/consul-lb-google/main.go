@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -114,6 +115,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 	// service model
 	lock := &sync.RWMutex{}
 	var serviceName string
+	var servicePort string
 	isRunning := false
 	instances := make(map[string]*registry.ServiceInstance)
 
@@ -124,15 +126,22 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 			case registry.NEW:
 				lock.Lock()
 				if !isRunning {
-					serviceName = update.ServiceName
-					isRunning = true
-					glog.Infof("Watching service [%s].", serviceName)
-					client.CreateInstanceGroup(serviceName)
+					glog.Infof("Initializing service [%s]..", update.ServiceName)
+					if err := client.CreateInstanceGroup(update.ServiceName); err != nil {
+						glog.Errorf("There was an error while initializing service [%s]. %s", update.ServiceName, err)
+					} else {
+						serviceName = update.ServiceName
+						isRunning = true
+						glog.Infof("Watching service [%s].", serviceName)
+					}
 				}
 				lock.Unlock()
 			case registry.DELETED:
 				lock.Lock()
 				if isRunning {
+					// reset state
+					serviceName = ""
+					servicePort = ""
 					isRunning = false
 					instances = make(map[string]*registry.ServiceInstance)
 					glog.Infof("Stopped watching service [%s].", serviceName)
@@ -140,23 +149,26 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 				// remove everything
 				// do it outside of the conditional block above, just in case there's
 				// stalled stuff in the cloud that should be removed
-				client.RemoveInstanceGroup(serviceName)
+				client.RemoveInstanceGroup(update.ServiceName)
 				lock.Unlock()
 			case registry.CHANGED:
 				lock.Lock()
 
-				// TODO validate if we've created the instance group for this service
-				// if not, print warning.. possible recreate
+				// validate if we've created the instance group for this service
+				if !isRunning {
+					glog.Warningf("Ignoring received event for unwatched service [%s].", serviceName)
+					lock.Unlock()
+					break
+				}
+
+				currentPort := servicePort
+				var toAdd, toRemove []string
 
 				// have all instances been removed?
 				if len(update.ServiceInstances) == 0 {
-					toRemove := make([]string, 0, len(instances))
 					for k := range instances {
 						// need to split k because Consul stores FQDN
 						toRemove = append(toRemove, strings.Split(k, ".")[0])
-					}
-					if len(toRemove) > 0 {
-						client.RemoveInstancesFromInstanceGroup(toRemove, serviceName)
 					}
 				} else {
 					// identify any deleted instances and remove from instance group
@@ -171,36 +183,61 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 								glog.Warningf("Removing instance [%s].", k)
 							}
 						}
-
-						// do we have instances to remove from the instance group?
-						if len(toRemove) > 0 {
-							client.RemoveInstancesFromInstanceGroup(toRemove, serviceName)
-						}
 					}
 
 					// find new or changed instances and create or change accordingly in cloud
 					for k, v := range update.ServiceInstances {
-						var toAdd []string
 						if instance, ok := instances[k]; !ok {
 							// new instance, create
-							glog.Warningf("Creating instance [%s].", k)
+							glog.Warningf("Adding instance [%s].", k)
 							instances[k] = v
 							// mark as new instance for further processing
 							// need to split k because Consul stores FQDN
 							toAdd = append(toAdd, strings.Split(k, ".")[0])
+
+							// check if service port is new
+							if currentPort != v.Port {
+								glog.Infof("Service has new port [%s]", v.Port)
+								currentPort = v.Port
+							}
 						} else {
 							glog.Warningf("Probable changes in [%s].", instance)
-							// already exists, compare
-							// TODO handle service port changes
-							// TODO change in cloud
-						}
-
-						// do we have new instances to add to the instance group?
-						if len(toAdd) > 0 {
-							client.AddInstancesToInstanceGroup(toAdd, serviceName)
+							// already exists, compare instance with v
+							if instance.Port != v.Port { // compare port
+								if currentPort != v.Port {
+									glog.Infof("Service has new port [%s]", v.Port)
+									currentPort = v.Port
+								}
+							}
 						}
 					}
 
+				}
+
+				// do we have instances to remove from the instance group?
+				if len(toRemove) > 0 {
+					if err := client.RemoveInstancesFromInstanceGroup(toRemove, serviceName); err != nil {
+						glog.Errorf("There was an error while removing instances from instance group [%s]. %s", serviceName, err)
+					}
+				}
+
+				// do we have new instances to add to the instance group?
+				if len(toAdd) > 0 {
+					if err := client.AddInstancesToInstanceGroup(toAdd, serviceName); err != nil {
+						glog.Errorf("There was an error while adding instances to instance group [%s]. %s", serviceName, err)
+					}
+				}
+
+				// do we need to change instance group port?
+				if currentPort != servicePort {
+					if port, err := strconv.ParseInt(currentPort, 10, 64); err != nil {
+						glog.Errorf("There was an error while setting service [%s] port. %s", serviceName, err)
+					} else {
+						if err := client.SetPortForInstanceGroup(port, serviceName); err != nil {
+							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while setting service [%s] port [%d]. %s", serviceName, currentPort, err)
+						}
+						servicePort = currentPort
+					}
 				}
 
 				lock.Unlock()
