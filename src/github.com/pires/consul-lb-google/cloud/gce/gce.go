@@ -1,5 +1,7 @@
 package gce
 
+// code ripped and adapted from Kubernetes source
+
 import (
 	"errors"
 	"fmt"
@@ -452,10 +454,20 @@ func (gce *GCEClient) RemoveUrlMap(name string) error {
 	return gce.waitForGlobalOp(op)
 }
 
+// TargetHttpProxy management
+
+// GetTargetHttpProxy returns the UrlMap by name.
+func (gce *GCEClient) GetTargetHttpProxy(name string) (*compute.TargetHttpProxy, error) {
+	thpName := makeHttpProxyName(name)
+	return gce.service.TargetHttpProxies.Get(gce.projectID, thpName).Do()
+}
+
 // CreateTargetHttpProxy creates and returns a TargetHttpProxy with the given UrlMap.
-func (gce *GCEClient) CreateTargetHttpProxy(urlMap *compute.UrlMap, name string) error {
+func (gce *GCEClient) CreateTargetHttpProxy(name string) error {
+	urlMap, _ := gce.GetUrlMap(name)
+	thpName := makeHttpProxyName(name)
 	proxy := &compute.TargetHttpProxy{
-		Name:   name,
+		Name:   thpName,
 		UrlMap: urlMap.SelfLink,
 	}
 	op, err := gce.service.TargetHttpProxies.Insert(gce.projectID, proxy).Do()
@@ -471,7 +483,8 @@ func (gce *GCEClient) CreateTargetHttpProxy(urlMap *compute.UrlMap, name string)
 
 // RemoveTargetHttpProxy removes the TargetHttpProxy by name.
 func (gce *GCEClient) RemoveTargetHttpProxy(name string) error {
-	op, err := gce.service.TargetHttpProxies.Delete(gce.projectID, name).Do()
+	thpName := makeHttpProxyName(name)
+	op, err := gce.service.TargetHttpProxies.Delete(gce.projectID, thpName).Do()
 	if err != nil {
 		if isHTTPErrorCode(err, http.StatusNotFound) {
 			return nil
@@ -479,6 +492,41 @@ func (gce *GCEClient) RemoveTargetHttpProxy(name string) error {
 		return err
 	}
 
+	return gce.waitForGlobalOp(op)
+}
+
+// GlobalForwardingRule management
+
+// CreateGlobalForwardingRule creates and returns a GlobalForwardingRule that points to the given TargetHttpProxy.
+func (gce *GCEClient) CreateGlobalForwardingRule(name string, portRange string) error {
+	thp, _ := gce.GetTargetHttpProxy(name)
+	fwdName := makeForwardingRuleName(name)
+	rule := &compute.ForwardingRule{
+		Name:       fwdName,
+		Target:     thp.SelfLink,
+		PortRange:  portRange,
+		IPProtocol: "TCP",
+	}
+	op, err := gce.service.GlobalForwardingRules.Insert(gce.projectID, rule).Do()
+	if err != nil {
+		return err
+	}
+	if err = gce.waitForGlobalOp(op); err != nil {
+		return err
+	}
+	return nil
+}
+
+// DeleteGlobalForwardingRule deletes the GlobalForwardingRule by name.
+func (gce *GCEClient) DeleteGlobalForwardingRule(name string) error {
+	fwdName := makeForwardingRuleName(name)
+	op, err := gce.service.GlobalForwardingRules.Delete(gce.projectID, fwdName).Do()
+	if err != nil {
+		if isHTTPErrorCode(err, http.StatusNotFound) {
+			return nil
+		}
+		return err
+	}
 	return gce.waitForGlobalOp(op)
 }
 
@@ -522,7 +570,12 @@ func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string, zones
 	}
 	glog.Infof("Created URL map with success.")
 
-	// TODO create or update target proxy with urlmap
+	// create target http proxy
+	if err := gce.CreateTargetHttpProxy(name); err != nil {
+		return err
+	}
+	glog.Infof("Created target HTTP proxy with success.")
+
 	// TODO create global fwd rule with target proxy
 
 	return nil
@@ -530,6 +583,12 @@ func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string, zones
 }
 
 func (gce *GCEClient) RemoveLoadBalancer(name string) error {
+	// remove target http proxy
+	if err := gce.RemoveTargetHttpProxy(name); err != nil {
+		return err
+	}
+	glog.Infof("Removed target HTTP proxy with success.")
+
 	// remove url map
 	if err := gce.RemoveUrlMap(name); err != nil {
 		return err
@@ -598,6 +657,14 @@ func makeBackendServiceName(name string) string {
 
 func makeHttpsHealthCheckName(name string) string {
 	return makeName("https-hc", name)
+}
+
+func makeHttpProxyName(name string) string {
+	return makeName("http-proxy", name)
+}
+
+func makeForwardingRuleName(name string) string {
+	return makeName("fwd-rule", name)
 }
 
 // makeFirewallObject returns a pre-populated instance of *computeFirewall
