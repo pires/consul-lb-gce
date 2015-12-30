@@ -25,7 +25,8 @@ var (
 )
 
 type consulConfiguration struct {
-	Url string
+	Url         string
+	TagsToWatch []string `toml:"tags_to_watch"`
 }
 
 type cloudConfiguration struct {
@@ -60,7 +61,8 @@ func main() {
 	// connect to Consul
 	glog.Infof("Connecting to Consul at %s..", cfg.Consul.Url)
 	r, err := consul.NewRegistry(&registry.Config{
-		Addresses: []string{cfg.Consul.Url},
+		Addresses:   []string{cfg.Consul.Url},
+		TagsToWatch: cfg.Consul.TagsToWatch,
 	})
 	if err != nil {
 		panic(err)
@@ -70,7 +72,6 @@ func main() {
 	updates := make(chan *registry.ServiceUpdate)
 	done := make(chan struct{})
 	// register for service updates
-	// TODO add filtering for selecting just a limited set of services, e.g based on tags
 	go r.Run(updates, done)
 
 	glog.Info("Waiting for service updates..")

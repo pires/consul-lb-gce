@@ -29,7 +29,8 @@ type ServiceUpdate struct {
 
 // Config represents a registry's configuration
 type Config struct {
-	Addresses []string
+	Addresses   []string
+	TagsToWatch []string
 }
 
 // Registry represents a registry for services

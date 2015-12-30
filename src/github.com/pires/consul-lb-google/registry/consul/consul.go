@@ -27,6 +27,7 @@ type consulRegistry struct {
 	client *consul.Client
 	sync.RWMutex
 	watchedServices map[string]*consulService
+	tagsToWatch     []string
 }
 
 // consulService contains data belonging to the same service.
@@ -58,6 +59,7 @@ func NewRegistry(config *registry.Config) (registry.Registry, error) {
 	return &consulRegistry{
 		client:          client,
 		watchedServices: make(map[string]*consulService),
+		tagsToWatch:     config.TagsToWatch,
 	}, nil
 }
 
@@ -144,19 +146,31 @@ func (cr *consulRegistry) watchServices(update chan<- *consulService, done <-cha
 			// continue
 		}
 		// check for services not yet cached locally.
-		for name := range services {
-			// ignore Consul service itself
-			if name == "consul" {
+		for k, v := range services {
+			// ignore all but the ones with specified tags
+			ignore := true
+			// iterate service tags
+			for tag := range v {
+				// iterate possible tags and compare
+				for tagToWatch := range cr.tagsToWatch {
+					if tag == tagToWatch {
+						ignore = false
+						// TODO add tag to watchedService
+					}
+				}
+			}
+			// have any of the tags to be watched been found?
+			if ignore {
 				continue
 			}
 
 			// is it a new service?
-			service, ok := cr.watchedServices[name]
+			service, ok := cr.watchedServices[k]
 			if !ok { // yes
 				service = new(consulService)
-				service.Name = name
+				service.Name = k
 				service.done = make(chan struct{})
-				cr.watchedServices[name] = service
+				cr.watchedServices[k] = service
 				// since src.running == false, registry will start watching this service
 				// before sending updates upstream
 				update <- service
