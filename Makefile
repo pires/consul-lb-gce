@@ -1,28 +1,21 @@
-GOPATH=$(shell pwd):$(shell pwd)/vendor
+.EXPORT_ALL_VARIABLES:
+
+GOPATH=$(shell pwd)
 
 all: clean build
 
+.PHONY: install
+install:
+	@cd src/github.com/pires/consul-lb-google; glide install
+
 build:
-	GOARCH=amd64 gb build all
+	@cd src/github.com/pires/consul-lb-google; go build
 
 .PHONY: clean
 clean:
-	@rm -rf ./{bin,pkg}
+	@rm -f src/github.com/pires/consul-lb-google/consul-lb-google
 	@gofmt -s -w src
-
-.PHONY: release
-release: clean
-	GOOS=linux GOARCH=amd64 gb build -ldflags '-w -extldflags=-static'
 
 .PHONY: test
 test:
-	@gb test -v
-
-#
-# Use COVPKG env var to set which package to run coverage
-#
-.PHONY: coverage
-coverage:
-	go test -v -coverprofile cover.out github.com/pires/consul-lb-google/${COVPKG}
-	@go tool cover -html=cover.out -o coverage.html
-	@rm cover.out
+	@cd src/github.com/pires/consul-lb-google; go test -v

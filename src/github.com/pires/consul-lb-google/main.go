@@ -142,7 +142,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 				if isRunning {
 					// remove everything
 					if err := client.RemoveLoadBalancer(serviceName); err != nil {
-						glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%d]. %s", serviceName, servicePort, err)
+						glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%s]. %s", serviceName, servicePort, err)
 					}
 					if err := client.RemoveInstanceGroup(serviceName); err != nil {
 						glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while removing instance group for service [%s]. %s", serviceName, err)

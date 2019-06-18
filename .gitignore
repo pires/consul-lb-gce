@@ -18,3 +18,6 @@ pkg
 ## user configuration
 *.toml
 *.json
+
+src/github.com/pires/consul-lb-google/consul-lb-google
+src/github.com/pires/consul-lb-google/vendor/**
