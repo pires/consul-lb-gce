@@ -1,4 +1,4 @@
-package: .
+package: github.com/pires/consul-lb-google
 import:
 - package: github.com/BurntSushi/toml
   version: 056c9bc7be7190eaa7715723883caffa5f8fa3e4
@@ -11,15 +11,6 @@ import:
   repo: https://github.com/hashicorp/consul
   subpackages:
   - api
-  - watch
-- package: github.com/hashicorp/go-cleanhttp
-  version: 5df5ddc69534f1a4697289f1dca2193fbb40213f
-  repo: https://github.com/hashicorp/go-cleanhttp
-- package: github.com/hashicorp/serf
-  version: e9ac4bb0c5721826d5cd3d1cd582c12fbc664bb8
-  repo: https://github.com/hashicorp/serf
-  subpackages:
-  - coordinate
 - package: golang.org/x/net
   version: d75b1902409c457a51e4bd1895031872c370983a
   repo: https://go.googlesource.com/net
@@ -32,28 +23,9 @@ import:
   - google
 - package: google.golang.org/api
   version: 80b32e23dd3e75da09373e0566232a3fe91ec43e
-  repo: https://code.googlesource.com/google-api-go-client
   subpackages:
   - compute/v1
-  - gensupport
   - googleapi
-- package: google.golang.org/cloud
-  version: ba8512ba2fa64d5a130fc8cd9a0d4e641e92e734
-  repo: https://code.googlesource.com/gocloud
-  subpackages:
-  - compute/metadata
-  - internal
-- package: k8s.io/kubernetes
-  version: 06df5c97e7e5331faa0d810e3458cfdce57087da
-  repo: https://github.com/kubernetes/kubernetes
-  subpackages:
-  - pkg/util/wait
-- package: github.com/pires/consul-lb-google
-  subpackages:
-  - cloud
-  - cloud/gce
-  - registry
-  - registry/consul
 - package: k8s.io/apimachinery
   subpackages:
   - pkg/util/wait
