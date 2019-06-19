@@ -25,6 +25,7 @@ type ServiceUpdate struct {
 	ServiceName      string
 	UpdateType       string
 	ServiceInstances map[string]*ServiceInstance
+	Tag              string
 }
 
 // Config represents a registry's configuration

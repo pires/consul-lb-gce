@@ -12,7 +12,7 @@ import (
 	"github.com/golang/glog"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2/google"
-	compute "google.golang.org/api/compute/v1"
+	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"strconv"
@@ -429,9 +429,25 @@ func (gce *GCEClient) GetUrlMap(name string) (*compute.UrlMap, error) {
 // CreateUrlMap creates an url map, using the given backend service as the default service.
 func (gce *GCEClient) CreateUrlMap(name string) error {
 	backend, _ := gce.GetBackendService(name)
+
+	// todo(max): replace hardcoded values
+	pathMatchers := make([]*compute.PathMatcher, 1)
+	pathMatchers[0] = &compute.PathMatcher{
+		Name:           "images2",
+		DefaultService: backend.SelfLink,
+	}
+
+	hostRules := make([]*compute.HostRule, 1)
+	hostRules[0] = &compute.HostRule{
+		Hosts:       []string{"images2.earthtoday.com"},
+		PathMatcher: "images2",
+	}
+
 	urlMap := &compute.UrlMap{
 		Name:           name,
 		DefaultService: backend.SelfLink,
+		HostRules:      hostRules,
+		PathMatchers:   pathMatchers,
 	}
 	op, err := gce.service.UrlMaps.Insert(gce.projectID, urlMap).Do()
 	if err != nil {
@@ -532,6 +548,7 @@ func (gce *GCEClient) RemoveGlobalForwardingRule(name string) error {
 }
 
 func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string, zones []string) error {
+	// todo(max): maybe we don't need firewall rule
 	// create or update firewall rule
 	// try to update first
 	if err := gce.UpdateFirewall(name, []string{port}); err != nil {
@@ -577,6 +594,7 @@ func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string, zones
 	}
 	glog.Infof("Created target HTTP proxy with success.")
 
+	// todo(max): maybe we don't need global forwarding rule
 	// TODO make the following optional
 	// create global forwarding rule
 	if err := gce.CreateGlobalForwardingRule(name, port); err != nil {

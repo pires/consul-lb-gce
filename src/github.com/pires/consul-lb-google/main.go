@@ -2,24 +2,27 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/BurntSushi/toml"
+	"github.com/golang/glog"
 	"github.com/pires/consul-lb-google/cloud"
 	"github.com/pires/consul-lb-google/registry"
 	"github.com/pires/consul-lb-google/registry/consul"
-
-	"github.com/BurntSushi/toml"
-	"github.com/golang/glog"
+	"github.com/pires/consul-lb-google/tagparser"
 )
 
 var (
 	config = flag.String("config", "config.toml", "Path to the configuration file")
 
 	client cloud.Cloud
+
+	tagParser tagparser.TagParser
 
 	err error
 )
@@ -55,6 +58,8 @@ func main() {
 	if _, err := toml.DecodeFile(*config, &cfg); err != nil {
 		panic(err)
 	}
+
+	tagParser = tagparser.New(cfg.TagParser.TagPrefix)
 
 	// provision cloud client
 	glog.Infof("Initializing cloud client [Project ID: %s, Network: %s, Allowed Zones: %#v]..", cfg.Cloud.Project, cfg.Cloud.Network, cfg.Cloud.AllowedZones)
@@ -128,12 +133,21 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 	for {
 		select {
 		case update := <-updates:
+			tagInfo, parseErr := tagParser.Parse(update.Tag)
+
+			if parseErr != nil {
+				glog.Errorf("There was an error while parsing service tag [%s]. %s", update.Tag, err)
+			}
+
+			instanceGroupName := getInstanceGroupName(tagInfo)
+
 			switch update.UpdateType {
 			case registry.NEW:
 				lock.Lock()
 				if !isRunning {
 					glog.Infof("Initializing service [%s]..", update.ServiceName)
-					if err := client.CreateInstanceGroup(update.ServiceName); err != nil {
+
+					if err := client.CreateInstanceGroup(instanceGroupName); err != nil {
 						glog.Errorf("There was an error while initializing service [%s]. %s", update.ServiceName, err)
 					} else {
 						serviceName = update.ServiceName
@@ -231,8 +245,8 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 
 				// do we have new instances to add to the instance group?
 				if len(toAdd) > 0 {
-					if err := client.AddInstancesToInstanceGroup(toAdd, serviceName); err != nil {
-						glog.Errorf("There was an error while adding instances to instance group [%s]. %s", serviceName, err)
+					if err := client.AddInstancesToInstanceGroup(toAdd, instanceGroupName); err != nil {
+						glog.Errorf("There was an error while adding instances to instance group [%s]. %s", instanceGroupName, err)
 					}
 				}
 
@@ -241,13 +255,13 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 					if port, err := strconv.ParseInt(currentPort, 10, 64); err != nil {
 						glog.Errorf("There was an error while setting service [%s] port. %s", serviceName, err)
 					} else {
-						if err := client.SetPortForInstanceGroup(port, serviceName); err != nil {
+						if err := client.SetPortForInstanceGroup(port, instanceGroupName); err != nil {
 							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while setting service [%s] port [%s]. %s", serviceName, currentPort, err)
 						}
 						servicePort = currentPort
 
 						// propagate networking changes
-						if err := client.CreateOrUpdateLoadBalancer(serviceName, servicePort); err != nil {
+						if err := client.CreateOrUpdateLoadBalancer(instanceGroupName, servicePort); err != nil {
 							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%s]. %s", serviceName, servicePort, err)
 						}
 					}
@@ -263,4 +277,20 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 			return
 		}
 	}
+}
+
+func getInstanceGroupName(tagInfo tagparser.TagInfo) string {
+	return fmt.Sprintf("proxy-%s-%s-%s", getCdnType(tagInfo.Cdn), tagInfo.Affinity, normalizeHost(tagInfo.Host))
+}
+
+func getCdnType(cdn bool) string {
+	if cdn {
+		return "cdn"
+	} else {
+		return "nocdn"
+	}
+}
+
+func normalizeHost(host string) string {
+	return strings.Replace(host, ".", "-", -1)
 }

@@ -37,6 +37,7 @@ type consulService struct {
 	removed   bool
 	running   bool
 	done      chan struct{}
+	tag       string
 }
 
 // NewRegistry returns a Consul-backed service registry
@@ -85,6 +86,7 @@ func (cr *consulRegistry) Run(upstream chan<- *registry.ServiceUpdate, done <-ch
 				upstream <- &registry.ServiceUpdate{
 					ServiceName: srv.Name,
 					UpdateType:  registry.DELETED,
+					Tag: 		 srv.tag,
 				}
 				break
 			}
@@ -96,6 +98,7 @@ func (cr *consulRegistry) Run(upstream chan<- *registry.ServiceUpdate, done <-ch
 				upstream <- &registry.ServiceUpdate{
 					ServiceName: srv.Name,
 					UpdateType:  registry.NEW,
+					Tag: 		 srv.tag,
 				}
 			}
 		}
@@ -150,12 +153,15 @@ func (cr *consulRegistry) watchServices(update chan<- *consulService, done <-cha
 			// ignore all but the ones with specified tags
 			ignore := true
 
+			var properTag string
+
 			// iterate service tags
 			for _, tag := range v {
 				// iterate possible tags and compare
 				for _, tagToWatch := range cr.tagsToWatch {
 					if tag == tagToWatch {
 						ignore = false
+						properTag = tag
 						// TODO add tag to watchedService
 					}
 				}
@@ -171,6 +177,7 @@ func (cr *consulRegistry) watchServices(update chan<- *consulService, done <-cha
 				service = new(consulService)
 				service.Name = k
 				service.done = make(chan struct{})
+				service.tag = properTag
 				cr.watchedServices[k] = service
 				// since src.running == false, registry will start watching this service
 				// before sending updates upstream
@@ -236,6 +243,7 @@ func (cr *consulRegistry) watchService(service *consulService, upstream chan<- *
 			ServiceName:      service.Name,
 			UpdateType:       registry.CHANGED,
 			ServiceInstances: service.Instances,
+			Tag:			  service.tag,
 		}
 		cr.Unlock()
 	}
