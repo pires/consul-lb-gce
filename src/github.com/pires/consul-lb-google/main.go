@@ -27,6 +27,7 @@ var (
 type consulConfiguration struct {
 	Url         string
 	TagsToWatch []string `toml:"tags_to_watch"`
+	TagPrefix   []string `toml:"tag_prefix"`
 }
 
 type cloudConfiguration struct {
@@ -81,7 +82,7 @@ func main() {
 		for {
 			select {
 			case update := <-updates:
-				// is there and handler for updated service?
+				// is there a handler for updated service?
 				if handler, ok := handlers[update.ServiceName]; !ok {
 					// no so provision handler
 					handler = make(chan *registry.ServiceUpdate)
