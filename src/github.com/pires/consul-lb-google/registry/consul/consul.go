@@ -149,10 +149,11 @@ func (cr *consulRegistry) watchServices(update chan<- *consulService, done <-cha
 		for k, v := range services {
 			// ignore all but the ones with specified tags
 			ignore := true
+
 			// iterate service tags
-			for tag := range v {
+			for _, tag := range v {
 				// iterate possible tags and compare
-				for tagToWatch := range cr.tagsToWatch {
+				for _, tagToWatch := range cr.tagsToWatch {
 					if tag == tagToWatch {
 						ignore = false
 						// TODO add tag to watchedService

@@ -46,8 +46,6 @@ func (parser *TagParserImpl) Parse(tag string) (TagInfo, error) {
 		}
 	}
 
-	glog.Infof("Parsed tag: %s", parsed)
-
 	return TagInfo{
 		Tag:      tag,
 		Cdn:      parsed["cdn"] == "cdn",

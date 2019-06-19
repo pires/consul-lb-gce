@@ -24,10 +24,13 @@ var (
 	err error
 )
 
+type tagParserConfiguration struct {
+	TagPrefix string `toml:"tag_prefix"`
+}
+
 type consulConfiguration struct {
 	Url         string
 	TagsToWatch []string `toml:"tags_to_watch"`
-	TagPrefix   []string `toml:"tag_prefix"`
 }
 
 type cloudConfiguration struct {
@@ -37,8 +40,9 @@ type cloudConfiguration struct {
 }
 
 type configuration struct {
-	Consul consulConfiguration
-	Cloud  cloudConfiguration
+	TagParser tagParserConfiguration
+	Consul    consulConfiguration
+	Cloud     cloudConfiguration
 }
 
 func main() {
