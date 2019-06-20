@@ -4,8 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-
-	"github.com/golang/glog"
 )
 
 var (
@@ -30,8 +28,6 @@ type TagParserImpl struct {
 }
 
 func (parser *TagParserImpl) Parse(tag string) (TagInfo, error) {
-	glog.Infof("Parse agrs: %s, %s", tag, parser.tagRegExp)
-
 	matched := parser.tagRegExp.FindStringSubmatch(tag)
 
 	if matched == nil {

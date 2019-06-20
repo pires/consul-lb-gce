@@ -276,15 +276,19 @@ func (gce *GCEClient) GetHttpHealthCheck(name string) (*compute.HttpHealthCheck,
 }
 
 // CreateHttpHealthCheck creates the given HttpHealthCheck.
-func (gce *GCEClient) CreateHttpHealthCheck(name string, port string) error {
+func (gce *GCEClient) CreateHttpHealthCheck(name string, port string, path string) error {
 	hcName := makeHttpHealthCheckName(name)
 	hcPort, err := strconv.ParseInt(port, 10, 64)
 	if err != nil {
 		hcPort = 80
 	}
+	if path == "" {
+		path = "/"
+	}
 	hc := &compute.HttpHealthCheck{
 		Name: hcName,
 		Port: hcPort,
+		RequestPath: path,
 	}
 	op, err := gce.service.HttpHealthChecks.Insert(gce.projectID, hc).Do()
 	if err != nil {
@@ -294,15 +298,19 @@ func (gce *GCEClient) CreateHttpHealthCheck(name string, port string) error {
 }
 
 // UpdateHttpHealthCheck applies the given HttpHealthCheck as an update.
-func (gce *GCEClient) UpdateHttpHealthCheck(name string, port string) error {
+func (gce *GCEClient) UpdateHttpHealthCheck(name string, port, path string) error {
 	hcName := makeHttpHealthCheckName(name)
 	hcPort, err := strconv.ParseInt(port, 10, 64)
 	if err != nil {
 		hcPort = 80
 	}
+	if path == "" {
+		path = "/"
+	}
 	hc := &compute.HttpHealthCheck{
-		Name: hcName,
-		Port: hcPort,
+		Name:        hcName,
+		Port:        hcPort,
+		RequestPath: path,
 	}
 	op, err := gce.service.HttpHealthChecks.Update(gce.projectID, hcName, hc).Do()
 	if err != nil {
@@ -547,7 +555,7 @@ func (gce *GCEClient) RemoveGlobalForwardingRule(name string) error {
 	return gce.waitForGlobalOp(op)
 }
 
-func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string, zones []string) error {
+func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string, healthCheckPath string, zones []string) error {
 	// todo(max): maybe we don't need firewall rule
 	// create or update firewall rule
 	// try to update first
@@ -562,9 +570,9 @@ func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string, zones
 
 	// create or update HTTP health-check
 	// try to update first
-	if err := gce.UpdateHttpHealthCheck(name, port); err != nil {
+	if err := gce.UpdateHttpHealthCheck(name, port, healthCheckPath); err != nil {
 		// couldn't update most probably because health-check didn't exist
-		if err := gce.CreateHttpHealthCheck(name, port); err != nil {
+		if err := gce.CreateHttpHealthCheck(name, port, healthCheckPath); err != nil {
 			// couldn't update or create
 			return err
 		}

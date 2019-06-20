@@ -20,6 +20,8 @@ import (
 var (
 	config = flag.String("config", "config.toml", "Path to the configuration file")
 
+	cfg configuration
+
 	client cloud.Cloud
 
 	tagParser tagparser.TagParser
@@ -34,6 +36,8 @@ type tagParserConfiguration struct {
 type consulConfiguration struct {
 	Url         string
 	TagsToWatch []string `toml:"tags_to_watch"`
+	// NOTE: Since we can't retrieve health checks definitions from Consul we must explicitly define them in configuration
+	HealthChecksPaths map[string]string `toml:"health_checks_paths"`
 }
 
 type cloudConfiguration struct {
@@ -54,7 +58,6 @@ func main() {
 	glog.Info("Starting..")
 
 	// read configuration
-	var cfg configuration
 	if _, err := toml.DecodeFile(*config, &cfg); err != nil {
 		panic(err)
 	}
@@ -250,8 +253,10 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 					}
 				}
 
+				glog.Infof("Service %s ports: old %s, new %s", update.ServiceName, servicePort, currentPort)
+				// todo(max): to take only identical ports (temporal)
 				// do we need to change instance group port?
-				if currentPort != servicePort {
+				if servicePort == "" && servicePort != currentPort {
 					if port, err := strconv.ParseInt(currentPort, 10, 64); err != nil {
 						glog.Errorf("There was an error while setting service [%s] port. %s", serviceName, err)
 					} else {
@@ -260,8 +265,14 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 						}
 						servicePort = currentPort
 
+						finalhealthCheckPath := ""
+
+						if healthCheckPath, ok := cfg.Consul.HealthChecksPaths[update.Tag]; ok {
+							finalhealthCheckPath = healthCheckPath
+						}
+
 						// propagate networking changes
-						if err := client.CreateOrUpdateLoadBalancer(instanceGroupName, servicePort); err != nil {
+						if err := client.CreateOrUpdateLoadBalancer(instanceGroupName, servicePort, finalhealthCheckPath); err != nil {
 							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%s]. %s", serviceName, servicePort, err)
 						}
 					}

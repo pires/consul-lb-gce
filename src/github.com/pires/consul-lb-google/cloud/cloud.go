@@ -33,7 +33,7 @@ type Cloud interface {
 	SetPortForInstanceGroup(port int64, groupName string) error
 
 	// CreateOrUpdateLoadBalancer creates a new or updates existing load-balancer related to an instance group
-	CreateOrUpdateLoadBalancer(groupName string, port string) error
+	CreateOrUpdateLoadBalancer(groupName string, port string, healthCheckPath string) error
 
 	// RemoveLoadBalancer removes an existing load-balancer related to an instance group
 	RemoveLoadBalancer(groupName string) error
@@ -262,9 +262,9 @@ func (c *gceCloud) SetPortForInstanceGroup(port int64, groupName string) error {
 	return nil
 }
 
-func (c *gceCloud) CreateOrUpdateLoadBalancer(groupName string, port string) error {
+func (c *gceCloud) CreateOrUpdateLoadBalancer(groupName string, port string, healthCheckPath string) error {
 	glog.Infof("Creating/updating load-balancer for [%s:%s].", groupName, port)
-	err := c.client.CreateOrUpdateLoadBalancer(groupName, port, c.zones)
+	err := c.client.CreateOrUpdateLoadBalancer(groupName, port, healthCheckPath, c.zones)
 	glog.Infof("Load-balancer [%s] created successfully.", groupName)
 	return err
 }
