@@ -44,6 +44,7 @@ type cloudConfiguration struct {
 	Project      string
 	Network      string
 	AllowedZones []string `toml:"allowed_zones"`
+	UrlMap       string   `toml:"url_map"`
 }
 
 type configuration struct {
@@ -163,9 +164,11 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 				lock.Lock()
 				if isRunning {
 					// remove everything
-					if err := client.RemoveLoadBalancer(serviceName); err != nil {
-						glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%s]. %s", serviceName, servicePort, err)
-					}
+					// todo(max): remove usage of backend service in url_map
+					// note: we can't remove url_map coz we didn't create it
+					//if err := client.RemoveLoadBalancer(serviceName); err != nil {
+					//	glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%s]. %s", serviceName, servicePort, err)
+					//}
 					if err := client.RemoveInstanceGroup(serviceName); err != nil {
 						glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while removing instance group for service [%s]. %s", serviceName, err)
 					}
@@ -265,14 +268,14 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 						}
 						servicePort = currentPort
 
-						finalhealthCheckPath := ""
+						finalHealthCheckPath := ""
 
 						if healthCheckPath, ok := cfg.Consul.HealthChecksPaths[update.Tag]; ok {
-							finalhealthCheckPath = healthCheckPath
+							finalHealthCheckPath = healthCheckPath
 						}
 
 						// propagate networking changes
-						if err := client.CreateOrUpdateLoadBalancer(instanceGroupName, servicePort, finalhealthCheckPath); err != nil {
+						if err := client.UpdateLoadBalancer(cfg.Cloud.UrlMap, instanceGroupName, servicePort, finalHealthCheckPath, tagInfo.Host, tagInfo.Path); err != nil {
 							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%s]. %s", serviceName, servicePort, err)
 						}
 					}

@@ -286,8 +286,8 @@ func (gce *GCEClient) CreateHttpHealthCheck(name string, port string, path strin
 		path = "/"
 	}
 	hc := &compute.HttpHealthCheck{
-		Name: hcName,
-		Port: hcPort,
+		Name:        hcName,
+		Port:        hcPort,
 		RequestPath: path,
 	}
 	op, err := gce.service.HttpHealthChecks.Insert(gce.projectID, hc).Do()
@@ -434,50 +434,70 @@ func (gce *GCEClient) GetUrlMap(name string) (*compute.UrlMap, error) {
 	return gce.service.UrlMaps.Get(gce.projectID, name).Do()
 }
 
-// CreateUrlMap creates an url map, using the given backend service as the default service.
-func (gce *GCEClient) CreateUrlMap(name string) error {
+// UpdateUrlMap updates an url map, using the given backend service as the default service.
+func (gce *GCEClient) UpdateUrlMap(urlMap *compute.UrlMap, name, host, path string) error {
 	backend, _ := gce.GetBackendService(name)
 
-	// todo(max): replace hardcoded values
-	pathMatchers := make([]*compute.PathMatcher, 1)
-	pathMatchers[0] = &compute.PathMatcher{
-		Name:           "images2",
-		DefaultService: backend.SelfLink,
+	pathMatcherName := strings.Split(host, ".")[0]
+
+	// create path matcher if it doesn't exist
+	var existingPathMatcher *compute.PathMatcher
+	for _, pm := range (urlMap.PathMatchers) {
+		if pm.Name == pathMatcherName {
+			existingPathMatcher = pm
+			break
+		}
+	}
+	if existingPathMatcher == nil {
+		// todo(max): handle paths like '/v1'
+		urlMap.PathMatchers = append(urlMap.PathMatchers, &compute.PathMatcher{
+			Name:           pathMatcherName,
+			DefaultService: backend.SelfLink,
+		})
 	}
 
-	hostRules := make([]*compute.HostRule, 1)
-	hostRules[0] = &compute.HostRule{
-		Hosts:       []string{"images2.earthtoday.com"},
-		PathMatcher: "images2",
+	// create path matcher if it doesn't exist
+	var existingHostRule *compute.HostRule
+	for _, hr := range (urlMap.HostRules) {
+		if hr.Description == pathMatcherName {
+			existingHostRule = hr
+			break
+		}
+	}
+	if existingHostRule == nil {
+		urlMap.HostRules = append(urlMap.HostRules, &compute.HostRule{
+			Hosts:       []string{host},
+			PathMatcher: pathMatcherName,
+			Description: host,
+		})
 	}
 
-	urlMap := &compute.UrlMap{
-		Name:           name,
-		DefaultService: backend.SelfLink,
-		HostRules:      hostRules,
-		PathMatchers:   pathMatchers,
+	if existingPathMatcher == nil || existingHostRule == nil {
+		op, err := gce.service.UrlMaps.Update(gce.projectID, urlMap.Name, urlMap).Do()
+
+		if err != nil {
+			return err
+		}
+
+		if err = gce.waitForGlobalOp(op); err != nil {
+			return err
+		}
 	}
-	op, err := gce.service.UrlMaps.Insert(gce.projectID, urlMap).Do()
-	if err != nil {
-		return err
-	}
-	if err = gce.waitForGlobalOp(op); err != nil {
-		return err
-	}
+
 	return nil
 }
 
 // RemoveUrlMap deletes a url map by name.
-func (gce *GCEClient) RemoveUrlMap(name string) error {
-	op, err := gce.service.UrlMaps.Delete(gce.projectID, name).Do()
-	if err != nil {
-		if isHTTPErrorCode(err, http.StatusNotFound) {
-			return nil
-		}
-		return err
-	}
-	return gce.waitForGlobalOp(op)
-}
+//func (gce *GCEClient) RemoveUrlMap(name string) error {
+//	op, err := gce.service.UrlMaps.Delete(gce.projectID, name).Do()
+//	if err != nil {
+//		if isHTTPErrorCode(err, http.StatusNotFound) {
+//			return nil
+//		}
+//		return err
+//	}
+//	return gce.waitForGlobalOp(op)
+//}
 
 // TargetHttpProxy management
 
@@ -555,18 +575,18 @@ func (gce *GCEClient) RemoveGlobalForwardingRule(name string) error {
 	return gce.waitForGlobalOp(op)
 }
 
-func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string, healthCheckPath string, zones []string) error {
+func (gce *GCEClient) UpdateLoadBalancer(urlMapName, name string, port string, healthCheckPath string, host, path string, zones []string) error {
 	// todo(max): maybe we don't need firewall rule
-	// create or update firewall rule
-	// try to update first
-	if err := gce.UpdateFirewall(name, []string{port}); err != nil {
-		// couldn't update most probably because firewall didn't exist
-		if err := gce.CreateFirewall(name, []string{port}); err != nil {
-			// couldn't update or create
-			return err
-		}
-	}
-	glog.Infof("Created/updated firewall rule with success.")
+	//// create or update firewall rule
+	//// try to update first
+	//if err := gce.UpdateFirewall(name, []string{port}); err != nil {
+	//	// couldn't update most probably because firewall didn't exist
+	//	if err := gce.CreateFirewall(name, []string{port}); err != nil {
+	//		// couldn't update or create
+	//		return err
+	//	}
+	//}
+	//glog.Infof("Created/updated firewall rule with success.")
 
 	// create or update HTTP health-check
 	// try to update first
@@ -590,70 +610,78 @@ func (gce *GCEClient) CreateOrUpdateLoadBalancer(name string, port string, healt
 	}
 	glog.Infof("Created/updated backend service with success.")
 
-	// create url map
-	if err := gce.CreateUrlMap(name); err != nil {
+	// todo(max): add host_rule, path_matcher, path_rule to existing url_map
+	urlMap, err := gce.GetUrlMap(urlMapName)
+
+	if err != nil {
+		glog.Errorf("Can't get url map %s", err)
+		return err
+	}
+
+	// update url map
+	if err := gce.UpdateUrlMap(urlMap, name, host, path); err != nil {
 		return err
 	}
 	glog.Infof("Created URL map with success.")
 
-	// create target http proxy
-	if err := gce.CreateTargetHttpProxy(name); err != nil {
-		return err
-	}
-	glog.Infof("Created target HTTP proxy with success.")
-
-	// todo(max): maybe we don't need global forwarding rule
-	// TODO make the following optional
-	// create global forwarding rule
-	if err := gce.CreateGlobalForwardingRule(name, port); err != nil {
-		return err
-	}
-	glog.Infof("Created global forwarding rule with success.")
-
-	return nil
-
-}
-
-func (gce *GCEClient) RemoveLoadBalancer(name string) error {
-	// TODO make the following optional according to creation
-	// remove global forwarding rule
-	if err := gce.RemoveGlobalForwardingRule(name); err != nil {
-		return err
-	}
-	glog.Infof("Removed global forwarding rule with success.")
-
-	// remove target http proxy
-	if err := gce.RemoveTargetHttpProxy(name); err != nil {
-		return err
-	}
-	glog.Infof("Removed target HTTP proxy with success.")
-
-	// remove url map
-	if err := gce.RemoveUrlMap(name); err != nil {
-		return err
-	}
-	glog.Infof("Removed URL map with success.")
-
-	// remove backend service
-	if err := gce.RemoveBackendService(name); err != nil {
-		return err
-	}
-	glog.Infof("Removed backend service with success.")
-
-	// remove HTTP health-check
-	if err := gce.RemoveHttpHealthCheck(name); err != nil {
-		return err
-	}
-	glog.Infof("Removed HTTP health-check with success.")
-
-	// remove firewall rule
-	if err := gce.RemoveFirewall(name); err != nil {
-		return err
-	}
-	glog.Infof("Removed firewall rule with success.")
+	// todo(max): deal with it (don't know if we need it)
+	//// create target http proxy
+	//if err := gce.CreateTargetHttpProxy(name); err != nil {
+	//	return err
+	//}
+	//glog.Infof("Created target HTTP proxy with success.")
+	//
+	//// todo(max): maybe we don't need global forwarding rule
+	//// TODO make the following optional
+	//// create global forwarding rule
+	//if err := gce.CreateGlobalForwardingRule(name, port); err != nil {
+	//	return err
+	//}
+	//glog.Infof("Created global forwarding rule with success.")
 
 	return nil
 }
+
+//func (gce *GCEClient) RemoveLoadBalancer(name string) error {
+//	// TODO make the following optional according to creation
+//	// remove global forwarding rule
+//	if err := gce.RemoveGlobalForwardingRule(name); err != nil {
+//		return err
+//	}
+//	glog.Infof("Removed global forwarding rule with success.")
+//
+//	// remove target http proxy
+//	if err := gce.RemoveTargetHttpProxy(name); err != nil {
+//		return err
+//	}
+//	glog.Infof("Removed target HTTP proxy with success.")
+//
+//	// remove url map
+//	if err := gce.RemoveUrlMap(name); err != nil {
+//		return err
+//	}
+//	glog.Infof("Removed URL map with success.")
+//
+//	// remove backend service
+//	if err := gce.RemoveBackendService(name); err != nil {
+//		return err
+//	}
+//	glog.Infof("Removed backend service with success.")
+//
+//	// remove HTTP health-check
+//	if err := gce.RemoveHttpHealthCheck(name); err != nil {
+//		return err
+//	}
+//	glog.Infof("Removed HTTP health-check with success.")
+//
+//	// remove firewall rule
+//	if err := gce.RemoveFirewall(name); err != nil {
+//		return err
+//	}
+//	glog.Infof("Removed firewall rule with success.")
+//
+//	return nil
+//}
 
 // helper methods
 

@@ -32,11 +32,11 @@ type Cloud interface {
 	// SetPortForInstanceGroup sets the port on an instance group
 	SetPortForInstanceGroup(port int64, groupName string) error
 
-	// CreateOrUpdateLoadBalancer creates a new or updates existing load-balancer related to an instance group
-	CreateOrUpdateLoadBalancer(groupName string, port string, healthCheckPath string) error
+	// UpdateLoadBalancer updates existing load-balancer related to an instance group
+	UpdateLoadBalancer(urlMapName, groupName string, port string, healthCheckPath, host, path string) error
 
 	// RemoveLoadBalancer removes an existing load-balancer related to an instance group
-	RemoveLoadBalancer(groupName string) error
+	//RemoveLoadBalancer(groupName string) error
 }
 
 type instanceGroup struct {
@@ -84,9 +84,13 @@ func (c *gceCloud) CreateInstanceGroup(groupName string) error {
 			m[finalGroupName] = &instanceGroup{} // empty
 			c.instanceGroups[zone] = m
 		} else {
-			glog.Errorf("There was an error creating instance group [%s] in zone [%s]. Error: %s", finalGroupName, zone, err)
-			cleanup = true
-			break
+			_, err = c.client.GetInstanceGroupForZone(finalGroupName, zone)
+
+			if err != nil {
+				glog.Errorf("There was an error creating instance group [%s] in zone [%s]. Error: %s", finalGroupName, zone, err)
+				cleanup = true
+				break
+			}
 		}
 	}
 
@@ -262,20 +266,20 @@ func (c *gceCloud) SetPortForInstanceGroup(port int64, groupName string) error {
 	return nil
 }
 
-func (c *gceCloud) CreateOrUpdateLoadBalancer(groupName string, port string, healthCheckPath string) error {
+func (c *gceCloud) UpdateLoadBalancer(urlMapName, groupName string, port string, healthCheckPath, host, path string) error {
 	glog.Infof("Creating/updating load-balancer for [%s:%s].", groupName, port)
-	err := c.client.CreateOrUpdateLoadBalancer(groupName, port, healthCheckPath, c.zones)
+	err := c.client.UpdateLoadBalancer(urlMapName, groupName, port, healthCheckPath, host, path, c.zones)
 	glog.Infof("Load-balancer [%s] created successfully.", groupName)
 	return err
 }
 
-func (c *gceCloud) RemoveLoadBalancer(groupName string) error {
-	glog.Infof("Removing load-balancer for [%s].", groupName)
-	err := c.client.RemoveLoadBalancer(groupName)
-	glog.Infof("Load-balancer [%s] removed successfully.", groupName)
-
-	return err
-}
+//func (c *gceCloud) RemoveLoadBalancer(groupName string) error {
+//	glog.Infof("Removing load-balancer for [%s].", groupName)
+//	err := c.client.RemoveLoadBalancer(groupName)
+//	glog.Infof("Load-balancer [%s] removed successfully.", groupName)
+//
+//	return err
+//}
 
 //zonify takes a specified name and prepends a specified zone plus an hyphen
 // e.g. zone == "us-east1-d" && name == "myname", returns "us-east1-d-myname"

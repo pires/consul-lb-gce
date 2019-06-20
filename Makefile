@@ -11,6 +11,9 @@ install:
 build:
 	@cd src/github.com/pires/consul-lb-google; go build
 
+release:
+	@cd src/github.com/pires/consul-lb-google; GOOS=linux GOARCH=amd64 go build
+
 .PHONY: clean
 clean:
 	@rm -f src/github.com/pires/consul-lb-google/consul-lb-google
