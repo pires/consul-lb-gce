@@ -576,17 +576,16 @@ func (gce *GCEClient) RemoveGlobalForwardingRule(name string) error {
 }
 
 func (gce *GCEClient) UpdateLoadBalancer(urlMapName, name string, port string, healthCheckPath string, host, path string, zones []string) error {
-	// todo(max): maybe we don't need firewall rule
-	//// create or update firewall rule
-	//// try to update first
-	//if err := gce.UpdateFirewall(name, []string{port}); err != nil {
-	//	// couldn't update most probably because firewall didn't exist
-	//	if err := gce.CreateFirewall(name, []string{port}); err != nil {
-	//		// couldn't update or create
-	//		return err
-	//	}
-	//}
-	//glog.Infof("Created/updated firewall rule with success.")
+	// create or update firewall rule
+	// try to update first
+	if err := gce.UpdateFirewall(name, []string{port}); err != nil {
+		// couldn't update most probably because firewall didn't exist
+		if err := gce.CreateFirewall(name, []string{port}); err != nil {
+			// couldn't update or create
+			return err
+		}
+	}
+	glog.Infof("Created/updated firewall rule with success.")
 
 	// create or update HTTP health-check
 	// try to update first
@@ -610,7 +609,6 @@ func (gce *GCEClient) UpdateLoadBalancer(urlMapName, name string, port string, h
 	}
 	glog.Infof("Created/updated backend service with success.")
 
-	// todo(max): add host_rule, path_matcher, path_rule to existing url_map
 	urlMap, err := gce.GetUrlMap(urlMapName)
 
 	if err != nil {
@@ -622,22 +620,7 @@ func (gce *GCEClient) UpdateLoadBalancer(urlMapName, name string, port string, h
 	if err := gce.UpdateUrlMap(urlMap, name, host, path); err != nil {
 		return err
 	}
-	glog.Infof("Created URL map with success.")
-
-	// todo(max): deal with it (don't know if we need it)
-	//// create target http proxy
-	//if err := gce.CreateTargetHttpProxy(name); err != nil {
-	//	return err
-	//}
-	//glog.Infof("Created target HTTP proxy with success.")
-	//
-	//// todo(max): maybe we don't need global forwarding rule
-	//// TODO make the following optional
-	//// create global forwarding rule
-	//if err := gce.CreateGlobalForwardingRule(name, port); err != nil {
-	//	return err
-	//}
-	//glog.Infof("Created global forwarding rule with success.")
+	glog.Infof("Updated URL map with success.")
 
 	return nil
 }
