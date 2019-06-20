@@ -102,9 +102,12 @@ func (c *gceCloud) CreateInstanceGroup(groupName string, managedZone, globalAddr
 		return ErrCantCreateInstanceGroup
 	}
 
-	if err := c.client.AddDnsRecordSet(managedZone, globalAddressName, host); err != nil {
-		return err
-	}
+	// todo(max): uncomment it later
+	// it's commented because of error: 'googleapi: Error 403: Request had insufficient authentication scopes., forbidden'
+	//if err := c.client.AddDnsRecordSet(managedZone, globalAddressName, host); err != nil {
+	//	return err
+	//}
+	//glog.Infof("Created DNS record set successfully [%s]", host)
 
 	glog.Infof("Created instance groups for [%s] successfully", groupName)
 

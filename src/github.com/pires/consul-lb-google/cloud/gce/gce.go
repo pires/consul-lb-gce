@@ -811,13 +811,11 @@ func (gce *GCEClient) AddDnsRecordSet(managedZone, globalAddressName, host strin
 	var address string
 
 	for _, addr := range addresses.Items {
-		// todo(max): add address name to configuration
 		if addr.Name == globalAddressName {
 			address = addr.Address
 		}
 	}
 
-	// todo(max): add managed zone name to configuration
 	_, err = gce.dnsService.Changes.Create(gce.projectID, managedZone, &dns.Change{
 		Additions: []*dns.ResourceRecordSet{
 			{
@@ -830,7 +828,7 @@ func (gce *GCEClient) AddDnsRecordSet(managedZone, globalAddressName, host strin
 		},
 	}).Do()
 
-	if err != nil {
+	if err != nil && (err.(*googleapi.Error)).Code != 409 {
 		return err
 	}
 
