@@ -41,10 +41,12 @@ type consulConfiguration struct {
 }
 
 type cloudConfiguration struct {
-	Project      string
-	Network      string
-	AllowedZones []string `toml:"allowed_zones"`
-	UrlMap       string   `toml:"url_map"`
+	Project           string
+	Network           string
+	AllowedZones      []string `toml:"allowed_zones"`
+	UrlMap            string   `toml:"url_map"`
+	DnsManagedZone    string   `toml:"dns_managed_zone"`
+	GlobalAddressName string   `toml:"global_address_name"`
 }
 
 type configuration struct {
@@ -151,7 +153,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 				if !isRunning {
 					glog.Infof("Initializing service [%s]..", update.ServiceName)
 
-					if err := client.CreateInstanceGroup(instanceGroupName); err != nil {
+					if err := client.CreateInstanceGroup(instanceGroupName, cfg.Cloud.DnsManagedZone, cfg.Cloud.GlobalAddressName, tagInfo.Host); err != nil {
 						glog.Errorf("There was an error while initializing service [%s]. %s", update.ServiceName, err)
 					} else {
 						serviceName = update.ServiceName

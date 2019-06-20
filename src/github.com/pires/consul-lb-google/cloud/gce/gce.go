@@ -5,6 +5,7 @@ package gce
 import (
 	"errors"
 	"fmt"
+	"google.golang.org/api/dns/v1"
 	"net/http"
 	"strings"
 	"time"
@@ -38,6 +39,7 @@ var (
 // GCEClient is a placeholder for GCE stuff.
 type GCEClient struct {
 	service    *compute.Service
+	dnsService *dns.Service
 	projectID  string
 	networkURL string
 }
@@ -56,10 +58,16 @@ func CreateGCECloud(project string, network string) (*GCEClient, error) {
 		return nil, err
 	}
 
+	dnsService, err := dns.New(client)
+	if err != nil {
+		return nil, err
+	}
+
 	// TODO validate project and network exist
 
 	return &GCEClient{
 		service:    svc,
+		dnsService: dnsService,
 		projectID:  project,
 		networkURL: makeNetworkURL(project, network),
 	}, nil
@@ -791,4 +799,40 @@ func (gce *GCEClient) waitForZoneOp(op *compute.Operation, zone string) error {
 	return waitForOp(op, func(operationName string) (*compute.Operation, error) {
 		return gce.service.ZoneOperations.Get(gce.projectID, zone, operationName).Do()
 	})
+}
+
+func (gce *GCEClient) AddDnsRecordSet(managedZone, globalAddressName, host string) error {
+	addresses, err := gce.service.GlobalAddresses.List(gce.projectID).Do()
+
+	if err != nil {
+		return err
+	}
+
+	var address string
+
+	for _, addr := range addresses.Items {
+		// todo(max): add address name to configuration
+		if addr.Name == globalAddressName {
+			address = addr.Address
+		}
+	}
+
+	// todo(max): add managed zone name to configuration
+	_, err = gce.dnsService.Changes.Create(gce.projectID, managedZone, &dns.Change{
+		Additions: []*dns.ResourceRecordSet{
+			{
+				Name:    host + ".",
+				Ttl:     300,
+				Type:    "A",
+				Rrdatas: []string{address},
+				Kind:    "dns#resourceRecordSet",
+			},
+		},
+	}).Do()
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

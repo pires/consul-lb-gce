@@ -18,7 +18,7 @@ var (
 
 type Cloud interface {
 	// CreateInstanceGroup creates an instance group
-	CreateInstanceGroup(groupName string) error
+	CreateInstanceGroup(groupName string, managedZone, globalAddressName, host string) error
 
 	// RemoveInstanceGroup removes an instance group
 	RemoveInstanceGroup(groupName string) error
@@ -72,7 +72,7 @@ func New(projectID string, network string, allowedZones []string) (Cloud, error)
 	}, nil
 }
 
-func (c *gceCloud) CreateInstanceGroup(groupName string) error {
+func (c *gceCloud) CreateInstanceGroup(groupName string, managedZone, globalAddressName, host string) error {
 	// create one instance-group per zone
 	cleanup := false
 	glog.Infof("Creating instance groups for [%s]..", groupName)
@@ -100,6 +100,10 @@ func (c *gceCloud) CreateInstanceGroup(groupName string) error {
 		// delete created instance groups
 		c.RemoveInstanceGroup(groupName)
 		return ErrCantCreateInstanceGroup
+	}
+
+	if err := c.client.AddDnsRecordSet(managedZone, globalAddressName, host); err != nil {
+		return err
 	}
 
 	glog.Infof("Created instance groups for [%s] successfully", groupName)
