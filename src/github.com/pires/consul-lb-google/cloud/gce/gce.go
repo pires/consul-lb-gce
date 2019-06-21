@@ -450,23 +450,31 @@ func (gce *GCEClient) UpdateUrlMap(urlMap *compute.UrlMap, name, host, path stri
 
 	// create path matcher if it doesn't exist
 	var existingPathMatcher *compute.PathMatcher
-	for _, pm := range (urlMap.PathMatchers) {
+	for _, pm := range urlMap.PathMatchers {
 		if pm.Name == pathMatcherName {
 			existingPathMatcher = pm
 			break
 		}
 	}
+	var defaultServiceLink string
+	if path == "/" {
+		defaultServiceLink = backend.SelfLink
+	} else {
+		defaultServiceLink = urlMap.DefaultService
+	}
 	if existingPathMatcher == nil {
-		// todo(max): handle paths like '/v1'
 		urlMap.PathMatchers = append(urlMap.PathMatchers, &compute.PathMatcher{
 			Name:           pathMatcherName,
-			DefaultService: backend.SelfLink,
+			DefaultService: defaultServiceLink,
+			PathRules: []*compute.PathRule{
+				GetPathRule(path, backend.SelfLink),
+			},
 		})
 	}
 
 	// create path matcher if it doesn't exist
 	var existingHostRule *compute.HostRule
-	for _, hr := range (urlMap.HostRules) {
+	for _, hr := range urlMap.HostRules {
 		if hr.Description == pathMatcherName {
 			existingHostRule = hr
 			break
@@ -833,4 +841,24 @@ func (gce *GCEClient) AddDnsRecordSet(managedZone, globalAddressName, host strin
 	}
 
 	return nil
+}
+
+func GetPathRule(path string, backendServiceLink string) *compute.PathRule {
+	if path == "/" {
+		return nil
+	}
+
+	if path[len(path)-1] == '/' {
+		path = path[:len(path)-1]
+	}
+
+	paths := []string{
+		path,
+		path + "/*",
+	}
+
+	return &compute.PathRule{
+		Paths:   paths,
+		Service: backendServiceLink,
+	}
 }
