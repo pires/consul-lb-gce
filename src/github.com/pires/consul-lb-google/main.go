@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -132,7 +131,6 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 	// service model
 	lock := &sync.RWMutex{}
 	var serviceName string
-	var servicePort string
 	isRunning := false
 	instances := make(map[string]*registry.ServiceInstance)
 
@@ -145,43 +143,47 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 				glog.Errorf("There was an error while parsing service tag [%s]. %s", update.Tag, err)
 			}
 
-			instanceGroupName := getInstanceGroupName(tagInfo)
+			networkEndpointGroupName := getNetworkEndpointGroupName(tagInfo)
 
 			switch update.UpdateType {
 			case registry.NEW:
 				lock.Lock()
 				if !isRunning {
-					glog.Infof("Initializing service [%s]..", update.ServiceName)
+					glog.Infof("Initializing service with tag [%s]..", update.Tag)
 
-					if err := client.CreateInstanceGroup(instanceGroupName, cfg.Cloud.DnsManagedZone, cfg.Cloud.GlobalAddressName, tagInfo.Host); err != nil {
-						glog.Errorf("There was an error while initializing service [%s]. %s", update.ServiceName, err)
+					// todo(max): create backend service also
+
+					if err := client.CreateNetworkEndpointGroup(networkEndpointGroupName); err != nil {
+						glog.Errorf("There was an error while creating network endpoint group [%s]. %s", networkEndpointGroupName, err)
 					} else {
-						serviceName = update.ServiceName
+						// NOTE: Create DNS needed record sets yourself.
+
 						isRunning = true
-						glog.Infof("Watching service [%s].", serviceName)
+						glog.Infof("Watching service with tag [%s].", update.Tag)
 					}
 				}
 				lock.Unlock()
-			case registry.DELETED:
-				lock.Lock()
-				if isRunning {
-					// remove everything
-					// todo(max): remove usage of backend service in url_map
-					// note: we can't remove url_map coz we didn't create it
-					//if err := client.RemoveLoadBalancer(serviceName); err != nil {
-					//	glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%s]. %s", serviceName, servicePort, err)
-					//}
-					if err := client.RemoveInstanceGroup(serviceName); err != nil {
-						glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while removing instance group for service [%s]. %s", serviceName, err)
-					}
-					glog.Infof("Stopped watching service [%s].", serviceName)
-					// reset state
-					serviceName = ""
-					servicePort = ""
-					isRunning = false
-					instances = make(map[string]*registry.ServiceInstance)
-				}
-				lock.Unlock()
+			// todo(max): deal with delete branch
+			//case registry.DELETED:
+			//	lock.Lock()
+			//	if isRunning {
+			//		// remove everything
+			//		// todo(max): remove usage of backend service in url_map
+			//		// note: we can't remove url_map coz we didn't create it
+			//		//if err := client.RemoveLoadBalancer(serviceName); err != nil {
+			//		//	glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%s]. %s", serviceName, servicePort, err)
+			//		//}
+			//		if err := client.RemoveInstanceGroup(serviceName); err != nil {
+			//			glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while removing instance group for service [%s]. %s", serviceName, err)
+			//		}
+			//		glog.Infof("Stopped watching service [%s].", serviceName)
+			//		// reset state
+			//		serviceName = ""
+			//		servicePort = ""
+			//		isRunning = false
+			//		instances = make(map[string]*registry.ServiceInstance)
+			//	}
+			//	lock.Unlock()
 			case registry.CHANGED:
 				lock.Lock()
 
@@ -192,24 +194,30 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 					break
 				}
 
-				currentPort := servicePort
-				var toAdd, toRemove []string
+				var toAdd, toRemove []cloud.NetworkEndpoint
 
 				// have all instances been removed?
 				if len(update.ServiceInstances) == 0 {
-					for k := range instances {
+					for k, v := range instances {
 						// need to split k because Consul stores FQDN
-						toRemove = append(toRemove, strings.Split(k, ".")[0])
+						toRemove = append(toRemove, cloud.NetworkEndpoint{
+							Instance: strings.Split(k, ".")[0],
+							Ip:       v.Host,
+							Port:     v.Port,
+						})
 					}
 				} else {
 					// identify any deleted instances and remove from instance group
 					if len(update.ServiceInstances) < len(instances) {
 						glog.Warningf("Removing %d instances.", len(instances)-len(update.ServiceInstances))
-						var toRemove []string
 						for k := range instances {
-							if _, ok := update.ServiceInstances[k]; !ok {
+							if v, ok := update.ServiceInstances[k]; !ok {
 								// need to split k because Consul stores FQDN
-								toRemove = append(toRemove, strings.Split(k, ".")[0])
+								toRemove = append(toRemove, cloud.NetworkEndpoint{
+									Instance: strings.Split(k, ".")[0],
+									Ip:       v.Host,
+									Port:     v.Port,
+								})
 								delete(instances, k)
 								glog.Warningf("Removing instance [%s].", k)
 							}
@@ -218,70 +226,46 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 
 					// find new or changed instances and create or change accordingly in cloud
 					for k, v := range update.ServiceInstances {
-						if instance, ok := instances[k]; !ok {
+						if _, ok := instances[k]; !ok {
 							// new instance, create
 							glog.Warningf("Adding instance [%s].", k)
 							instances[k] = v
 							// mark as new instance for further processing
 							// need to split k because Consul stores FQDN
-							toAdd = append(toAdd, strings.Split(k, ".")[0])
-
-							// check if service port is new
-							if currentPort != v.Port {
-								glog.Infof("Service has new port [%s]", v.Port)
-								currentPort = v.Port
-							}
-						} else {
-							// already exists, compare instance with v
-							if instance.Port != v.Port { // compare port
-								if currentPort != v.Port {
-									glog.Infof("Service has new port [%s]", v.Port)
-									currentPort = v.Port
-								}
-							}
+							toAdd = append(toAdd, cloud.NetworkEndpoint{
+								Instance: strings.Split(k, ".")[0],
+								Ip:       v.Host,
+								Port:     v.Port,
+							})
 						}
 					}
 
 				}
 
-				// do we have instances to remove from the instance group?
+				//do we have instances to remove from the instance group?
 				if len(toRemove) > 0 {
-					if err := client.RemoveInstancesFromInstanceGroup(toRemove, serviceName); err != nil {
-						glog.Errorf("There was an error while removing instances from instance group [%s]. %s", serviceName, err)
+					if err := client.RemoveEndpointsFromNetworkEndpointGroup(toRemove, networkEndpointGroupName); err != nil {
+						glog.Errorf("There was an error while removing instances from network endpoint group [%s]. %s", networkEndpointGroupName, err)
 					}
 				}
 
 				// do we have new instances to add to the instance group?
 				if len(toAdd) > 0 {
-					if err := client.AddInstancesToInstanceGroup(toAdd, instanceGroupName); err != nil {
-						glog.Errorf("There was an error while adding instances to instance group [%s]. %s", instanceGroupName, err)
+					if err := client.AddEndpointsToNetworkEndpointGroup(toAdd, networkEndpointGroupName); err != nil {
+						glog.Errorf("There was an error while adding instances to network endpoint group [%s]. %s", networkEndpointGroupName, err)
 					}
 				}
 
-				glog.Infof("Service %s ports: old %s, new %s", update.ServiceName, servicePort, currentPort)
-				// todo(max): to take only identical ports (temporal)
-				// do we need to change instance group port?
-				if servicePort == "" && servicePort != currentPort {
-					if port, err := strconv.ParseInt(currentPort, 10, 64); err != nil {
-						glog.Errorf("There was an error while setting service [%s] port. %s", serviceName, err)
-					} else {
-						if err := client.SetPortForInstanceGroup(port, instanceGroupName); err != nil {
-							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while setting service [%s] port [%s]. %s", serviceName, currentPort, err)
-						}
-						servicePort = currentPort
-
-						finalHealthCheckPath := ""
-
-						if healthCheckPath, ok := cfg.Consul.HealthChecksPaths[update.Tag]; ok {
-							finalHealthCheckPath = healthCheckPath
-						}
-
-						// propagate networking changes
-						if err := client.UpdateLoadBalancer(cfg.Cloud.UrlMap, instanceGroupName, servicePort, finalHealthCheckPath, tagInfo.Host, tagInfo.Path); err != nil {
-							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%s]. %s", serviceName, servicePort, err)
-						}
-					}
-				}
+				// todo(max): add condition to update url map
+				//finalHealthCheckPath := ""
+				//
+				//if healthCheckPath, ok := cfg.Consul.HealthChecksPaths[update.Tag]; ok {
+				//	finalHealthCheckPath = healthCheckPath
+				//}
+				//
+				//if err := client.UpdateLoadBalancer(cfg.Cloud.UrlMap, networkEndpointGroupName, finalHealthCheckPath, tagInfo.Host, tagInfo.Path); err != nil {
+				//	glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s]. %s", serviceName, err)
+				//}
 
 				lock.Unlock()
 			default:
@@ -295,7 +279,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 	}
 }
 
-func getInstanceGroupName(tagInfo tagparser.TagInfo) string {
+func getNetworkEndpointGroupName(tagInfo tagparser.TagInfo) string {
 	return fmt.Sprintf("proxy-%s-%s-%s", getCdnType(tagInfo.Cdn), tagInfo.Affinity, normalizeHost(tagInfo.Host))
 }
 

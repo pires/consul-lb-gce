@@ -16,7 +16,6 @@ import (
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"strconv"
 )
 
 const (
@@ -284,18 +283,13 @@ func (gce *GCEClient) GetHttpHealthCheck(name string) (*compute.HttpHealthCheck,
 }
 
 // CreateHttpHealthCheck creates the given HttpHealthCheck.
-func (gce *GCEClient) CreateHttpHealthCheck(name string, port string, path string) error {
+func (gce *GCEClient) CreateHttpHealthCheck(name string, path string) error {
 	hcName := makeHttpHealthCheckName(name)
-	hcPort, err := strconv.ParseInt(port, 10, 64)
-	if err != nil {
-		hcPort = 80
-	}
 	if path == "" {
 		path = "/"
 	}
 	hc := &compute.HttpHealthCheck{
 		Name:        hcName,
-		Port:        hcPort,
 		RequestPath: path,
 	}
 	op, err := gce.service.HttpHealthChecks.Insert(gce.projectID, hc).Do()
@@ -306,18 +300,13 @@ func (gce *GCEClient) CreateHttpHealthCheck(name string, port string, path strin
 }
 
 // UpdateHttpHealthCheck applies the given HttpHealthCheck as an update.
-func (gce *GCEClient) UpdateHttpHealthCheck(name string, port, path string) error {
+func (gce *GCEClient) UpdateHttpHealthCheck(name, path string) error {
 	hcName := makeHttpHealthCheckName(name)
-	hcPort, err := strconv.ParseInt(port, 10, 64)
-	if err != nil {
-		hcPort = 80
-	}
 	if path == "" {
 		path = "/"
 	}
 	hc := &compute.HttpHealthCheck{
 		Name:        hcName,
-		Port:        hcPort,
 		RequestPath: path,
 	}
 	op, err := gce.service.HttpHealthChecks.Update(gce.projectID, hcName, hc).Do()
@@ -443,7 +432,15 @@ func (gce *GCEClient) GetUrlMap(name string) (*compute.UrlMap, error) {
 }
 
 // UpdateUrlMap updates an url map, using the given backend service as the default service.
-func (gce *GCEClient) UpdateUrlMap(urlMap *compute.UrlMap, name, host, path string) error {
+func (gce *GCEClient) UpdateUrlMap(urlMapName, name, host, path string) error {
+
+	urlMap, err := gce.GetUrlMap(urlMapName)
+
+	if err != nil {
+		glog.Errorf("Can't get url map %s", err)
+		return err
+	}
+
 	backend, _ := gce.GetBackendService(name)
 
 	pathMatcherName := strings.Split(host, ".")[0]
@@ -591,29 +588,20 @@ func (gce *GCEClient) RemoveGlobalForwardingRule(name string) error {
 	return gce.waitForGlobalOp(op)
 }
 
-func (gce *GCEClient) UpdateLoadBalancer(urlMapName, name string, port string, healthCheckPath string, host, path string, zones []string) error {
-	// create or update firewall rule
-	// try to update first
-	if err := gce.UpdateFirewall(name, []string{port}); err != nil {
-		// couldn't update most probably because firewall didn't exist
-		if err := gce.CreateFirewall(name, []string{port}); err != nil {
-			// couldn't update or create
-			return err
-		}
-	}
-	glog.Infof("Created/updated firewall rule with success.")
+func (gce *GCEClient) UpdateLoadBalancer(urlMapName, name string, healthCheckPath string, host, path string, zones []string) error {
+	// NOTE: You must create firewall rule yourself.
 
 	// create or update HTTP health-check
 	// try to update first
-	if err := gce.UpdateHttpHealthCheck(name, port, healthCheckPath); err != nil {
+	if err := gce.UpdateHttpHealthCheck(name, healthCheckPath); err != nil {
 		// couldn't update most probably because health-check didn't exist
-		if err := gce.CreateHttpHealthCheck(name, port, healthCheckPath); err != nil {
-			// couldn't update or create
+		if err := gce.CreateHttpHealthCheck(name, healthCheckPath); err != nil {
 			return err
 		}
 	}
 	glog.Infof("Created/updated HTTP health-check with success.")
 
+	// todo(max): make backend service using NEG
 	// create or update backend service, only for allowed zones
 	// try to update first
 	if err := gce.UpdateBackendService(name, zones); err != nil {
@@ -625,15 +613,8 @@ func (gce *GCEClient) UpdateLoadBalancer(urlMapName, name string, port string, h
 	}
 	glog.Infof("Created/updated backend service with success.")
 
-	urlMap, err := gce.GetUrlMap(urlMapName)
-
-	if err != nil {
-		glog.Errorf("Can't get url map %s", err)
-		return err
-	}
-
-	// update url map
-	if err := gce.UpdateUrlMap(urlMap, name, host, path); err != nil {
+	// NOTE: UrlMap must be created before using this tool.
+	if err := gce.UpdateUrlMap(urlMapName, name, host, path); err != nil {
 		return err
 	}
 	glog.Infof("Updated URL map with success.")
