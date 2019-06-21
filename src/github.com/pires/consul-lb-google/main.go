@@ -222,10 +222,10 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 
 				// have all instances been removed?
 				if len(update.ServiceInstances) == 0 {
-					for k, v := range instances {
+					for _, v := range instances {
 						// need to split k because Consul stores FQDN
 						toRemove = append(toRemove, cloud.NetworkEndpoint{
-							Instance: strings.Split(k, ".")[0],
+							Instance: strings.Split(v.Host, ".")[0],
 							Ip:       v.Address,
 							Port:     v.Port,
 						})
@@ -238,7 +238,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 							if v, ok := update.ServiceInstances[k]; !ok {
 								// need to split k because Consul stores FQDN
 								toRemove = append(toRemove, cloud.NetworkEndpoint{
-									Instance: strings.Split(k, ".")[0],
+									Instance: strings.Split(v.Host, ".")[0],
 									Ip:       v.Address,
 									Port:     v.Port,
 								})
@@ -257,7 +257,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 							// mark as new instance for further processing
 							// need to split k because Consul stores FQDN
 							toAdd = append(toAdd, cloud.NetworkEndpoint{
-								Instance: strings.Split(k, ".")[0],
+								Instance: strings.Split(v.Host, ".")[0],
 								Ip:       v.Address,
 								Port:     v.Port,
 							})
