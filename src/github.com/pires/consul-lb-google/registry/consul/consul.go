@@ -2,6 +2,7 @@ package consul
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -220,12 +221,11 @@ func (cr *consulRegistry) watchService(service *consulService, upstream chan<- *
 		service.Instances = make(map[string]*registry.ServiceInstance, len(nodes))
 
 		for _, node := range nodes {
-			service.Instances[node.Node] = &registry.ServiceInstance{
+			service.Instances[fmt.Sprintf("%s:%d", node.ServiceAddress, node.ServicePort)] = &registry.ServiceInstance{
 				Host:    node.Node,
 				Address: node.Address,
 				Tags:    node.ServiceTags,
 				Port:    strconv.Itoa(node.ServicePort),
-				// ServiceId:   node.ServiceID,
 			}
 		}
 
