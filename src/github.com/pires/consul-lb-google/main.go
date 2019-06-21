@@ -177,6 +177,11 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 							continue
 						}
 
+						if err := client.UpdateLoadBalancer(cfg.Cloud.UrlMap, networkEndpointGroupName, tagInfo.Host, tagInfo.Path); err != nil {
+							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s]. %s", serviceName, err)
+							continue
+						}
+
 						isRunning = true
 						glog.Infof("Watching service with tag [%s].", update.Tag)
 					}
@@ -273,12 +278,6 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 					if err := client.AddEndpointsToNetworkEndpointGroup(toAdd, networkEndpointGroupName); err != nil {
 						glog.Errorf("There was an error while adding instances to network endpoint group [%s]. %s", networkEndpointGroupName, err)
 					}
-				}
-
-				// todo(max): add condition to update url map
-
-				if err := client.UpdateLoadBalancer(cfg.Cloud.UrlMap, networkEndpointGroupName, tagInfo.Host, tagInfo.Path); err != nil {
-					glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s]. %s", serviceName, err)
 				}
 
 				lock.Unlock()

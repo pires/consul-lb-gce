@@ -292,7 +292,7 @@ func (gce *GCEClient) CreateHttpHealthCheck(name string, path string) error {
 	if path == "" {
 		path = "/"
 	}
-	cmd := exec.Command("gcloud", "beta", "compute", "health-checks", "create", "http", hcName, "--request-path="+path, "--use-serving-port")
+	cmd := exec.Command("gcloud", "beta", "compute", "health-checks", "create", "http", hcName, "--request-path="+path, "--use-serving-port", "--global")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	err := cmd.Run()
@@ -859,7 +859,7 @@ func (gce *GCEClient) CreateBackendService(zonifiedGroupName, groupName, zone, a
 		cdnOption = "--enable-cdn"
 	}
 
-	cmd := exec.Command("gcloud", "beta", "compute", "backend-services", "create", bsName, "--global", "--health-checks", hcName, cdnOption, affinityOption)
+	cmd := exec.Command("gcloud", "beta", "compute", "backend-services", "create", bsName, "--global", "--global-health-checks", "--health-checks", hcName, cdnOption, affinityOption)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	err := cmd.Run()
