@@ -1,7 +1,14 @@
+[tagParser]
+tag_prefix = "tagprefix-"
+
 [consul]
-url = "consul.service.consul:8500"
+url = "localhost:8500"
+tags_to_watch = [ "tagprefix-nocdn:noaffinity:subdomain.domain.tld/" ]
+  [consul.health_checks_paths]
+  "tagprefix-nocdn:noaffinity:images2.earthtoday.com/" = "/healthcheck"
 
 [cloud]
 project = "my-project-id"
 network = "default"
-allowed_zones = ["us-east1-d", "europe-west1-d", "asia-east1-c"]
+allowed_zones = ["europe-west4-b"]
+url_map = "https-map"

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/pires/consul-lb-google/util"
 	"os/exec"
 	"strings"
 
@@ -82,7 +83,7 @@ func (c *gceCloud) AddEndpointsToNetworkEndpointGroup(endpoints []NetworkEndpoin
 	glog.Infof("Adding %d network endpoints into network endpoint group [%s]", len(endpoints), groupName)
 
 	for _, zone := range c.zones {
-		finalGroupName := zonify(zone, groupName)
+		finalGroupName := util.Zonify(zone, groupName)
 
 		for _, endpoint := range endpoints {
 			cmd := exec.Command("gcloud", "beta", "compute", "network-endpoint-groups", "update",
@@ -117,7 +118,7 @@ func (c *gceCloud) CreateDnsRecordSet(managedZone, globalAddressName, host strin
 
 func (c *gceCloud) CreateNetworkEndpointGroup(groupName string) error {
 	for _, zone := range c.zones {
-		finalGroupName := zonify(zone, groupName)
+		finalGroupName := util.Zonify(zone, groupName)
 		cmd := exec.Command("gcloud", "beta", "compute", "network-endpoint-groups", "create", finalGroupName, "--zone="+zone, "--network=default", "--subnet=default", "--default-port=80")
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
@@ -141,7 +142,7 @@ func (c *gceCloud) CreateNetworkEndpointGroup(groupName string) error {
 
 func (c *gceCloud) CreateBackendServiceWithNetworkEndpointGroup(groupName string, affinity string, cdn bool) error {
 	for _, zone := range c.zones {
-		finalGroupName := zonify(zone, groupName)
+		finalGroupName := util.Zonify(zone, groupName)
 		err := c.client.CreateBackendService(finalGroupName, groupName, zone, affinity, cdn)
 		if err != nil {
 			return err
@@ -153,7 +154,7 @@ func (c *gceCloud) CreateBackendServiceWithNetworkEndpointGroup(groupName string
 func (c *gceCloud) UpdateLoadBalancer(urlMapName, groupName string, host, path string) error {
 	glog.Infof("Updating load-balancer for [%s].", groupName)
 	for _, zone := range c.zones {
-		err := c.client.UpdateLoadBalancer(urlMapName, zonify(zone, groupName), host, path)
+		err := c.client.UpdateLoadBalancer(urlMapName, util.Zonify(zone, groupName), host, path)
 		if err != nil {
 			return err
 		}
@@ -164,16 +165,4 @@ func (c *gceCloud) UpdateLoadBalancer(urlMapName, groupName string, host, path s
 
 func (c *gceCloud) AddHealthCheck(groupName, path string) error {
 	return c.client.CreateHttpHealthCheck(groupName, path)
-}
-
-//zonify takes a specified name and prepends a specified zone plus an hyphen
-// e.g. zone == "us-east1-d" && name == "myname", returns "us-east1-d-myname"
-func zonify(zone string, name string) string {
-	return strings.Join([]string{zone, name}, "-")
-}
-
-// unzonify takes a specified supposedly zonified name and removes the zone prefix.
-// e.g. name == "us-east1-d-myname" && zone == "us-east1-d", returns "myname"
-func unzonify(name string, zone string) string {
-	return strings.TrimPrefix(name, zone)
 }
