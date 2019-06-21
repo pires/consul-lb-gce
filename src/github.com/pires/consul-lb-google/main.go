@@ -158,6 +158,25 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 					} else {
 						// NOTE: Create DNS needed record sets yourself.
 
+						finalHealthCheckPath := ""
+
+						if healthCheckPath, ok := cfg.Consul.HealthChecksPaths[update.Tag]; ok {
+							finalHealthCheckPath = healthCheckPath
+						}
+
+						err := client.AddHealthCheck(networkEndpointGroupName, finalHealthCheckPath)
+
+						if err != nil {
+							glog.Errorf("Failed creating health check. %s", err)
+						}
+
+						err = client.CreateBackendServiceWithNetworkEndpointGroup(networkEndpointGroupName)
+
+						if err != nil {
+							glog.Errorf("Failed creating backend service. %s", err)
+							continue
+						}
+
 						isRunning = true
 						glog.Infof("Watching service with tag [%s].", update.Tag)
 					}
@@ -202,7 +221,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 						// need to split k because Consul stores FQDN
 						toRemove = append(toRemove, cloud.NetworkEndpoint{
 							Instance: strings.Split(k, ".")[0],
-							Ip:       v.Host,
+							Ip:       v.Address,
 							Port:     v.Port,
 						})
 					}
@@ -215,7 +234,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 								// need to split k because Consul stores FQDN
 								toRemove = append(toRemove, cloud.NetworkEndpoint{
 									Instance: strings.Split(k, ".")[0],
-									Ip:       v.Host,
+									Ip:       v.Address,
 									Port:     v.Port,
 								})
 								delete(instances, k)
@@ -234,7 +253,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 							// need to split k because Consul stores FQDN
 							toAdd = append(toAdd, cloud.NetworkEndpoint{
 								Instance: strings.Split(k, ".")[0],
-								Ip:       v.Host,
+								Ip:       v.Address,
 								Port:     v.Port,
 							})
 						}
@@ -257,15 +276,10 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 				}
 
 				// todo(max): add condition to update url map
-				//finalHealthCheckPath := ""
-				//
-				//if healthCheckPath, ok := cfg.Consul.HealthChecksPaths[update.Tag]; ok {
-				//	finalHealthCheckPath = healthCheckPath
-				//}
-				//
-				//if err := client.UpdateLoadBalancer(cfg.Cloud.UrlMap, networkEndpointGroupName, finalHealthCheckPath, tagInfo.Host, tagInfo.Path); err != nil {
-				//	glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s]. %s", serviceName, err)
-				//}
+
+				if err := client.UpdateLoadBalancer(cfg.Cloud.UrlMap, networkEndpointGroupName, tagInfo.Host, tagInfo.Path); err != nil {
+					glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s]. %s", serviceName, err)
+				}
 
 				lock.Unlock()
 			default:

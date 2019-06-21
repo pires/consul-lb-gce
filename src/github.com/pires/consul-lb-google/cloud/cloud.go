@@ -25,14 +25,18 @@ type Cloud interface {
 	// CreateNetworkEndpointGroup creates an network endpoint group
 	CreateNetworkEndpointGroup(groupName string) error
 
+	AddHealthCheck(groupName, path string) error
+
 	// AddEndpointsToNetworkEndpointGroup adds a set of endpoints to an network endpoint group
 	AddEndpointsToNetworkEndpointGroup(endpoints []NetworkEndpoint, groupName string) error
 
 	// RemoveEndpointsFromNetworkEndpointGroup removes a set of endpoints from an network endpoint group
 	RemoveEndpointsFromNetworkEndpointGroup(endpoints []NetworkEndpoint, groupName string) error
 
+	CreateBackendServiceWithNetworkEndpointGroup(groupName string) error
+
 	// UpdateLoadBalancer updates existing load-balancer related to an instance group
-	UpdateLoadBalancer(urlMapName, groupName, healthCheckPath, host, path string) error
+	UpdateLoadBalancer(urlMapName, groupName, host, path string) error
 }
 
 type NetworkEndpoint struct {
@@ -82,7 +86,7 @@ func (c *gceCloud) AddEndpointsToNetworkEndpointGroup(endpoints []NetworkEndpoin
 
 		for _, endpoint := range endpoints {
 			cmd := exec.Command("gcloud", "beta", "compute", "network-endpoint-groups", "update",
-				finalGroupName, "--zone="+zone, "--add-endpoint", fmt.Sprintf("`instance=%s,ip=%s,port=%s`", endpoint.Instance, endpoint.Ip, endpoint.Port))
+				finalGroupName, "--zone="+zone, "--add-endpoint", fmt.Sprintf("instance=%s,ip=%s,port=%s", endpoint.Instance, endpoint.Ip, endpoint.Port))
 
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
@@ -130,14 +134,36 @@ func (c *gceCloud) CreateNetworkEndpointGroup(groupName string) error {
 
 	glog.Infof("Created network endpoint group [%s] successfully", groupName)
 
+	// todo(max): add health check
+
 	return nil
 }
 
-func (c *gceCloud) UpdateLoadBalancer(urlMapName, groupName string, healthCheckPath, host, path string) error {
-	glog.Infof("Creating/updating load-balancer for [%s].", groupName)
-	err := c.client.UpdateLoadBalancer(urlMapName, groupName, healthCheckPath, host, path, c.zones)
-	glog.Infof("Load-balancer [%s] created successfully.", groupName)
-	return err
+func (c *gceCloud) CreateBackendServiceWithNetworkEndpointGroup(groupName string) error {
+	for _, zone := range c.zones {
+		finalGroupName := zonify(zone, groupName)
+		err := c.client.CreateBackendService(finalGroupName, groupName, zone)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *gceCloud) UpdateLoadBalancer(urlMapName, groupName string, host, path string) error {
+	glog.Infof("Updating load-balancer for [%s].", groupName)
+	for _, zone := range c.zones {
+		err := c.client.UpdateLoadBalancer(urlMapName, zonify(zone, groupName), host, path)
+		if err != nil {
+			return err
+		}
+	}
+	glog.Infof("Load-balancer [%s] updated successfully.", groupName)
+	return nil
+}
+
+func (c *gceCloud) AddHealthCheck(groupName, path string) error {
+	return c.client.CreateHttpHealthCheck(groupName, path)
 }
 
 //zonify takes a specified name and prepends a specified zone plus an hyphen

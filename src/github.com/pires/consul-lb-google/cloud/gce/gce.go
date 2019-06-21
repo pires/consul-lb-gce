@@ -3,10 +3,12 @@ package gce
 // code ripped and adapted from Kubernetes source
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"google.golang.org/api/dns/v1"
 	"net/http"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -29,6 +31,8 @@ const (
 	operationPollTimeoutDuration = 30 * time.Minute
 
 	servicePort = "service-port"
+
+	maxResourceNameLength = 63
 )
 
 var (
@@ -288,15 +292,14 @@ func (gce *GCEClient) CreateHttpHealthCheck(name string, path string) error {
 	if path == "" {
 		path = "/"
 	}
-	hc := &compute.HttpHealthCheck{
-		Name:        hcName,
-		RequestPath: path,
-	}
-	op, err := gce.service.HttpHealthChecks.Insert(gce.projectID, hc).Do()
+	cmd := exec.Command("gcloud", "beta", "compute", "health-checks", "create", "http", hcName, "--request-path="+path, "--use-serving-port")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
 	if err != nil {
-		return err
+		glog.Errorf("Failed creating health check [%s]. %s", hcName, stderr.String())
 	}
-	return gce.waitForGlobalOp(op)
+	return nil
 }
 
 // UpdateHttpHealthCheck applies the given HttpHealthCheck as an update.
@@ -344,38 +347,38 @@ func zonify(zone string, name string) string {
 }
 
 // CreateBackendService creates the given BackendService.
-func (gce *GCEClient) CreateBackendService(name string, zones []string) error {
-	bsName := makeBackendServiceName(name)
-
-	// prepare backends
-	var backends []*compute.Backend
-	// one backend (instance group) per zone
-	for _, zone := range zones {
-		// instance groups have been previously zonified
-		ig, _ := gce.GetInstanceGroupForZone(zonify(zone, name), zone)
-		backends = append(backends, &compute.Backend{
-			Description: zone,
-			Group:       ig.SelfLink,
-		})
-	}
-
-	hc, _ := gce.GetHttpHealthCheck(name)
-
-	// prepare backend service
-	bs := &compute.BackendService{
-		Backends:     backends,
-		HealthChecks: []string{hc.SelfLink},
-		Name:         bsName,
-		PortName:     servicePort,
-		Protocol:     "HTTP",
-		TimeoutSec:   10, // TODO make configurable
-	}
-	op, err := gce.service.BackendServices.Insert(gce.projectID, bs).Do()
-	if err != nil {
-		return err
-	}
-	return gce.waitForGlobalOp(op)
-}
+//func (gce *GCEClient) CreateBackendService(name string, zones []string) error {
+//	bsName := makeBackendServiceName(name)
+//
+//	// prepare backends
+//	var backends []*compute.Backend
+//	// one backend (instance group) per zone
+//	for _, zone := range zones {
+//		// instance groups have been previously zonified
+//		ig, _ := gce.GetInstanceGroupForZone(zonify(zone, name), zone)
+//		backends = append(backends, &compute.Backend{
+//			Description: zone,
+//			Group:       ig.SelfLink,
+//		})
+//	}
+//
+//	hc, _ := gce.GetHttpHealthCheck(name)
+//
+//	// prepare backend service
+//	bs := &compute.BackendService{
+//		Backends:     backends,
+//		HealthChecks: []string{hc.SelfLink},
+//		Name:         bsName,
+//		PortName:     servicePort,
+//		Protocol:     "HTTP",
+//		TimeoutSec:   10, // TODO make configurable
+//	}
+//	op, err := gce.service.BackendServices.Insert(gce.projectID, bs).Do()
+//	if err != nil {
+//		return err
+//	}
+//	return gce.waitForGlobalOp(op)
+//}
 
 // UpdateBackendService applies the given BackendService as an update to an existing service.
 func (gce *GCEClient) UpdateBackendService(name string, zones []string) error {
@@ -441,7 +444,12 @@ func (gce *GCEClient) UpdateUrlMap(urlMapName, name, host, path string) error {
 		return err
 	}
 
-	backend, _ := gce.GetBackendService(name)
+	backend, err := gce.GetBackendService(name)
+
+	if err != nil {
+		glog.Errorf("Can't get backend service %s", err)
+		return err
+	}
 
 	pathMatcherName := strings.Split(host, ".")[0]
 
@@ -588,32 +596,11 @@ func (gce *GCEClient) RemoveGlobalForwardingRule(name string) error {
 	return gce.waitForGlobalOp(op)
 }
 
-func (gce *GCEClient) UpdateLoadBalancer(urlMapName, name string, healthCheckPath string, host, path string, zones []string) error {
+func (gce *GCEClient) UpdateLoadBalancer(urlMapName, name, host, path string) error {
 	// NOTE: You must create firewall rule yourself.
 
-	// create or update HTTP health-check
-	// try to update first
-	if err := gce.UpdateHttpHealthCheck(name, healthCheckPath); err != nil {
-		// couldn't update most probably because health-check didn't exist
-		if err := gce.CreateHttpHealthCheck(name, healthCheckPath); err != nil {
-			return err
-		}
-	}
-	glog.Infof("Created/updated HTTP health-check with success.")
-
-	// todo(max): make backend service using NEG
-	// create or update backend service, only for allowed zones
-	// try to update first
-	if err := gce.UpdateBackendService(name, zones); err != nil {
-		// couldn't update most probably because backend service didn't exist
-		if err := gce.CreateBackendService(name, zones); err != nil {
-			// couldn't update or create
-			return err
-		}
-	}
-	glog.Infof("Created/updated backend service with success.")
-
 	// NOTE: UrlMap must be created before using this tool.
+
 	if err := gce.UpdateUrlMap(urlMapName, name, host, path); err != nil {
 		return err
 	}
@@ -686,8 +673,16 @@ func makeHostURL(projectID, zone, host string) string {
 		projectID, zone, host)
 }
 
+// NOTE: maximal length of resource name is 63 and name must start and end with letter or digit
 func makeName(prefix string, name string) string {
-	return strings.Join([]string{prefix, name}, "-")
+	n := strings.Join([]string{prefix, name}, "-")
+	if len(n) > maxResourceNameLength {
+		n = n[:maxResourceNameLength]
+		if n[len(n)-1] == '-' {
+			return n[:len(n)-2]
+		}
+	}
+	return n
 }
 
 func makeFirewallName(name string) string {
@@ -842,4 +837,33 @@ func GetPathRule(path string, backendServiceLink string) *compute.PathRule {
 		Paths:   paths,
 		Service: backendServiceLink,
 	}
+}
+
+func (gce *GCEClient) CreateBackendService(zonifiedGroupName, groupName, zone string) error {
+	bsName := makeBackendServiceName(zonifiedGroupName)
+	hcName := makeHttpHealthCheckName(groupName)
+
+	cmd := exec.Command("gcloud", "beta", "compute", "backend-services", "create", bsName, "--global", "--health-checks", hcName)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err != nil {
+		glog.Errorf("Failed creating backend service [%s]. %s", bsName, stderr.String())
+		if !strings.Contains(stderr.String(), "already exists") {
+			return err
+		}
+	}
+
+	cmd = exec.Command("gcloud", "beta", "compute", "backend-services", "add-backend", bsName,
+		"--global", "--network-endpoint-group="+zonifiedGroupName, "--network-endpoint-group-zone="+zone, "--balancing-mode=RATE", "--max-rate-per-endpoint=5")
+	stderr = bytes.Buffer{}
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	if err != nil {
+		glog.Errorf("Failed attaching network endpoint group [%s] to backend service [%s]. %s", groupName, bsName, stderr.String())
+		if !strings.Contains(stderr.String(), "already exists") {
+			return err
+		}
+	}
+	return nil
 }
