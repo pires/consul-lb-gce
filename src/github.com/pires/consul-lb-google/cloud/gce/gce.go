@@ -839,11 +839,27 @@ func GetPathRule(path string, backendServiceLink string) *compute.PathRule {
 	}
 }
 
-func (gce *GCEClient) CreateBackendService(zonifiedGroupName, groupName, zone string) error {
+func (gce *GCEClient) CreateBackendService(zonifiedGroupName, groupName, zone, affinity string, cdn bool) error {
 	bsName := makeBackendServiceName(zonifiedGroupName)
 	hcName := makeHttpHealthCheckName(groupName)
 
-	cmd := exec.Command("gcloud", "beta", "compute", "backend-services", "create", bsName, "--global", "--health-checks", hcName)
+	cdnOption := ""
+	if cdn {
+		cdnOption = "--enable-cdn"
+	}
+
+	affinityOption := "--session-affinity="
+	switch affinity {
+	case "ipaffinity":
+		affinityOption += "CLIENT_IP"
+	case "noaffinity":
+		affinityOption += "NONE"
+	}
+	if cdn {
+		cdnOption = "--enable-cdn"
+	}
+
+	cmd := exec.Command("gcloud", "beta", "compute", "backend-services", "create", bsName, "--global", "--health-checks", hcName, cdnOption, affinityOption)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	err := cmd.Run()

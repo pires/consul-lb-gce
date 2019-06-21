@@ -33,7 +33,7 @@ type Cloud interface {
 	// RemoveEndpointsFromNetworkEndpointGroup removes a set of endpoints from an network endpoint group
 	RemoveEndpointsFromNetworkEndpointGroup(endpoints []NetworkEndpoint, groupName string) error
 
-	CreateBackendServiceWithNetworkEndpointGroup(groupName string) error
+	CreateBackendServiceWithNetworkEndpointGroup(groupName string, affinity string, cdn bool) error
 
 	// UpdateLoadBalancer updates existing load-balancer related to an instance group
 	UpdateLoadBalancer(urlMapName, groupName, host, path string) error
@@ -139,10 +139,10 @@ func (c *gceCloud) CreateNetworkEndpointGroup(groupName string) error {
 	return nil
 }
 
-func (c *gceCloud) CreateBackendServiceWithNetworkEndpointGroup(groupName string) error {
+func (c *gceCloud) CreateBackendServiceWithNetworkEndpointGroup(groupName string, affinity string, cdn bool) error {
 	for _, zone := range c.zones {
 		finalGroupName := zonify(zone, groupName)
-		err := c.client.CreateBackendService(finalGroupName, groupName, zone)
+		err := c.client.CreateBackendService(finalGroupName, groupName, zone, affinity, cdn)
 		if err != nil {
 			return err
 		}

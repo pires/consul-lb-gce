@@ -170,7 +170,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 							glog.Errorf("Failed creating health check. %s", err)
 						}
 
-						err = client.CreateBackendServiceWithNetworkEndpointGroup(networkEndpointGroupName)
+						err = client.CreateBackendServiceWithNetworkEndpointGroup(networkEndpointGroupName, tagInfo.Affinity, tagInfo.Cdn)
 
 						if err != nil {
 							glog.Errorf("Failed creating backend service. %s", err)
