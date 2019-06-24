@@ -281,10 +281,6 @@ func (gce *GCEClient) makeHealthCheckUrl(healthCheckName string) string {
 	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/global/healthChecks/%s", gce.projectID, healthCheckName)
 }
 
-func (gce *GCEClient) makeInstanceUrl(instance, zone string) string {
-	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/instances/%s", gce.projectID, zone, instance)
-}
-
 func (gce *GCEClient) makeAttachNetworkEndpointsUrl(groupName, zone string) string {
 	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/networkEndpointGroups/%s/attachNetworkEndpoints", gce.projectID, zone, groupName)
 }
@@ -300,7 +296,7 @@ func (gce *GCEClient) makeAttachOrDetachNetworkEndpointsBody(endpoints []Network
 			"instance": "%s",
 			"ipAddress": "%s",
 			"port": %s
-		}`, gce.makeInstanceUrl(endpoint.Instance, zone), endpoint.Ip, endpoint.Port))
+		}`, endpoint.Instance, endpoint.Ip, endpoint.Port))
 	}
 	return bytes.NewBuffer([]byte(fmt.Sprintf("{ \"networkEndpoints\": [%s] }", strings.Join(endpointsJsons, ","))))
 }
