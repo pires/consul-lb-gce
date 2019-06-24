@@ -2,7 +2,6 @@ package gce
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"github.com/pires/consul-lb-google/util"
 	"google.golang.org/api/dns/v1"
@@ -28,9 +27,11 @@ const (
 	maxResourceNameLength = 63
 )
 
-var (
-	ErrInstanceNotFound = errors.New("Instance not found")
-)
+type NetworkEndpoint struct {
+	Instance string
+	Ip       string
+	Port     string
+}
 
 // GCEClient is a placeholder for GCE stuff.
 type GCEClient struct {
@@ -69,6 +70,62 @@ func CreateGCECloud(project string, network string) (*GCEClient, error) {
 		projectID:  project,
 		networkURL: makeNetworkURL(project, network),
 	}, nil
+}
+
+func (gce *GCEClient) CreateNetworkEndpointGroup(groupName, zone string) error {
+	request, err := http.NewRequest("POST", gce.makeCreateNetworkEndpointGroupUrl(zone), gce.makeCreateNetworkEndpointGroupBody(groupName, gce.networkURL))
+
+	if err != nil {
+		return err
+	}
+
+	request.Header.Add("Content-Type", "application/json")
+
+	_, err = util.SendRequest(gce.httpClient, request, []int{http.StatusOK, http.StatusConflict})
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (gce *GCEClient) AttachNetworkEndpoints(groupName, zone string, endpoints []NetworkEndpoint) error {
+	request, err := http.NewRequest("POST", gce.makeAttachNetworkEndpointsUrl(groupName, zone),
+		gce.makeAttachOrDetachNetworkEndpointsBody(endpoints, zone))
+
+	if err != nil {
+		return err
+	}
+
+	request.Header.Add("Content-Type", "application/json")
+
+	_, err = util.SendRequest(gce.httpClient, request, []int{http.StatusOK, http.StatusConflict})
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (gce *GCEClient) DetachNetworkEndpoints(groupName, zone string, endpoints []NetworkEndpoint) error {
+	request, err := http.NewRequest("POST", gce.makeDetachNetworkEndpointsUrl(groupName, zone),
+		gce.makeAttachOrDetachNetworkEndpointsBody(endpoints, zone))
+
+	if err != nil {
+		return err
+	}
+
+	request.Header.Add("Content-Type", "application/json")
+
+	_, err = util.SendRequest(gce.httpClient, request, []int{http.StatusOK, http.StatusConflict})
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // HttpHealthCheck Management
@@ -222,6 +279,45 @@ func (gce *GCEClient) makeNetworkEndpointGroupUrl(negName, zone string) string {
 
 func (gce *GCEClient) makeHealthCheckUrl(healthCheckName string) string {
 	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/global/healthChecks/%s", gce.projectID, healthCheckName)
+}
+
+func (gce *GCEClient) makeInstanceUrl(instance, zone string) string {
+	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/instances/%s", gce.projectID, zone, instance)
+}
+
+func (gce *GCEClient) makeAttachNetworkEndpointsUrl(groupName, zone string) string {
+	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/networkEndpointGroups/%s/attachNetworkEndpoints", gce.projectID, zone, groupName)
+}
+
+func (gce *GCEClient) makeDetachNetworkEndpointsUrl(groupName, zone string) string {
+	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/networkEndpointGroups/%s/detachNetworkEndpoints", gce.projectID, zone, groupName)
+}
+
+func (gce *GCEClient) makeAttachOrDetachNetworkEndpointsBody(endpoints []NetworkEndpoint, zone string) *bytes.Buffer {
+	var endpointsJsons []string
+	for _, endpoint := range endpoints {
+		endpointsJsons = append(endpointsJsons, fmt.Sprintf(`{
+			"instance": "%s",
+			"ipAddress": "%s",
+			"port": %s
+		}`, gce.makeInstanceUrl(endpoint.Instance, zone), endpoint.Ip, endpoint.Port))
+	}
+	return bytes.NewBuffer([]byte(fmt.Sprintf("{ \"networkEndpoints\": [%s] }", strings.Join(endpointsJsons, ","))))
+}
+
+
+func (gce *GCEClient) makeCreateNetworkEndpointGroupUrl(zone string) string {
+	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/networkEndpointGroups", gce.projectID, zone)
+}
+
+func (gce *GCEClient) makeCreateNetworkEndpointGroupBody(name, network string) *bytes.Buffer {
+	return bytes.NewBuffer([]byte(fmt.Sprintf(`{
+		"name": "%s",
+		"description": "Managed by consul-lb-google",
+		"defaultPort": 80,
+		"networkEndpointType": "GCE_VM_IP_PORT",
+		"network": "%s"
+	}`, name, network)))
 }
 
 func (gce *GCEClient) makeCreateHealthCheckUrl() string {

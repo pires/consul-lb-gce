@@ -1,11 +1,9 @@
 package util
 
 import (
-	"bytes"
 	"errors"
 	"io/ioutil"
 	"net/http"
-	"os/exec"
 	"strings"
 )
 
@@ -19,23 +17,6 @@ func Zonify(zone, name string) string {
 // e.g. name == "us-east1-d-myname" && zone == "us-east1-d", returns "myname"
 func Unzonify(name string, zone string) string {
 	return strings.TrimPrefix(name, zone+"-")
-}
-
-func ExecCommand(arguments []string) error {
-	cmd := exec.Command(arguments[0], arguments[1:]...)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return errors.New(stderr.String())
-	}
-
-	return nil
-}
-
-func IsAlreadyExistsError(err error) bool {
-	return strings.Contains(err.Error(), "already exists")
 }
 
 func SendRequest(c *http.Client, req *http.Request, successStatusCodes []int) (*http.Response, error) {

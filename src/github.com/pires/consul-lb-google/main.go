@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/pires/consul-lb-google/cloud/gce"
 	"github.com/pires/consul-lb-google/util"
 	"os"
 	"os/signal"
@@ -154,10 +155,10 @@ func handleService(tag string, updates <-chan *registry.ServiceUpdate, wg sync.W
 			case registry.DELETED:
 				lock.Lock()
 				if isRunning {
-					var toRemove []cloud.NetworkEndpoint
+					var toRemove []gce.NetworkEndpoint
 
 					for k, instance := range instances {
-						toRemove = append(toRemove, cloud.NetworkEndpoint{
+						toRemove = append(toRemove, gce.NetworkEndpoint{
 							Instance: util.NormalizeInstanceName(instance.Host),
 							Ip:       instance.Address,
 							Port:     instance.Port,
@@ -185,13 +186,13 @@ func handleService(tag string, updates <-chan *registry.ServiceUpdate, wg sync.W
 					break
 				}
 
-				var toAdd, toRemove []cloud.NetworkEndpoint
+				var toAdd, toRemove []gce.NetworkEndpoint
 
 				// finding instances to remove
 				for k, instance := range instances {
 					// Doesn't instance exist in update?
 					if _, ok := update.ServiceInstances[k]; !ok {
-						toRemove = append(toRemove, cloud.NetworkEndpoint{
+						toRemove = append(toRemove, gce.NetworkEndpoint{
 							Instance: util.NormalizeInstanceName(instance.Host),
 							Ip:       instance.Address,
 							Port:     instance.Port,
@@ -204,7 +205,7 @@ func handleService(tag string, updates <-chan *registry.ServiceUpdate, wg sync.W
 				for k, instance := range update.ServiceInstances {
 					// Doesn't instance exist in running instances?
 					if _, ok := instances[k]; !ok {
-						toAdd = append(toAdd, cloud.NetworkEndpoint{
+						toAdd = append(toAdd, gce.NetworkEndpoint{
 							Instance: util.NormalizeInstanceName(instance.Host),
 							Ip:       instance.Address,
 							Port:     instance.Port,

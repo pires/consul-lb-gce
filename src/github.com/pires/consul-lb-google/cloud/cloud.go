@@ -1,7 +1,6 @@
 package cloud
 
 import (
-	"fmt"
 	"github.com/golang/glog"
 	"github.com/pires/consul-lb-google/cloud/gce"
 	"github.com/pires/consul-lb-google/util"
@@ -14,22 +13,16 @@ type Cloud interface {
 	AddHealthCheck(groupName, path string) error
 
 	// Adds a set of endpoints to a network endpoint group
-	AddEndpointsToNetworkEndpointGroup(endpoints []NetworkEndpoint, groupName string) error
+	AddEndpointsToNetworkEndpointGroup(endpoints []gce.NetworkEndpoint, groupName string) error
 
 	// Removes a set of endpoints from a network endpoint group
-	RemoveEndpointsFromNetworkEndpointGroup(endpoints []NetworkEndpoint, groupName string) error
+	RemoveEndpointsFromNetworkEndpointGroup(endpoints []gce.NetworkEndpoint, groupName string) error
 
 	// Creates backend service with network endpoint group as backend with affinity and cdn properties
 	CreateBackendService(groupName, affinity string, cdn bool) error
 
 	// Updates existing load-balancer related to a group
 	UpdateUrlMap(urlMapName, groupName, host, path string) error
-}
-
-type NetworkEndpoint struct {
-	Instance string
-	Ip       string
-	Port     string
 }
 
 type gceCloud struct {
@@ -55,11 +48,8 @@ func (c *gceCloud) CreateNetworkEndpointGroup(groupName string) error {
 	for _, zone := range c.zones {
 		finalGroupName := util.Zonify(zone, groupName)
 
-		args := []string{"gcloud", "beta", "compute", "network-endpoint-groups", "create", finalGroupName, "--zone=" + zone, "--network=default", "--subnet=default", "--default-port=80"}
-
-		if err := util.ExecCommand(args); err != nil && !util.IsAlreadyExistsError(err) {
+		if err := c.client.CreateNetworkEndpointGroup(finalGroupName, zone); err != nil {
 			glog.Errorf("Failed creating network endpoint group [%s]. %s", finalGroupName, err)
-			return err
 		}
 	}
 
@@ -76,30 +66,37 @@ func (c *gceCloud) AddHealthCheck(groupName, path string) error {
 	return nil
 }
 
-func (c *gceCloud) AddEndpointsToNetworkEndpointGroup(endpoints []NetworkEndpoint, groupName string) error {
+func (c *gceCloud) AddEndpointsToNetworkEndpointGroup(endpoints []gce.NetworkEndpoint, groupName string) error {
 	glog.Infof("Adding %d network endpoints into network endpoint group [%s]", len(endpoints), groupName)
 
 	for _, zone := range c.zones {
 		finalGroupName := util.Zonify(zone, groupName)
 
-		for _, endpoint := range endpoints {
-			endpointSignature := fmt.Sprintf("instance=%s,ip=%s,port=%s", endpoint.Instance, endpoint.Ip, endpoint.Port)
+		err := c.client.AttachNetworkEndpoints(finalGroupName, zone, endpoints)
 
-			args := []string{"gcloud", "beta", "compute", "network-endpoint-groups", "update",
-				finalGroupName, "--zone=" + zone, "--add-endpoint", endpointSignature}
-
-			if err := util.ExecCommand(args); err != nil {
-				glog.Errorf("Failed adding endpoint to network endpoint group [%s]. %s", finalGroupName, err)
-			} else {
-				glog.Infof("Added network endpoint [%s] into network endpoint group [%s]", endpointSignature, finalGroupName)
-			}
+		if err != nil {
+			glog.Errorf("Failed adding endpoints to network endpoint group [%s]. %s", finalGroupName, err)
+			return err
 		}
 	}
 
 	return nil
 }
 
-func (c *gceCloud) RemoveEndpointsFromNetworkEndpointGroup(endpoints []NetworkEndpoint, groupName string) error {
+func (c *gceCloud) RemoveEndpointsFromNetworkEndpointGroup(endpoints []gce.NetworkEndpoint, groupName string) error {
+	glog.Infof("Removing %d network endpoints from network endpoint group [%s]", len(endpoints), groupName)
+
+	for _, zone := range c.zones {
+		finalGroupName := util.Zonify(zone, groupName)
+
+		err := c.client.DetachNetworkEndpoints(finalGroupName, zone, endpoints)
+
+		if err != nil {
+			glog.Errorf("Failed removing endpoints from network endpoint group [%s]. %s", finalGroupName, err)
+			return err
+		}
+	}
+
 	return nil
 }
 
