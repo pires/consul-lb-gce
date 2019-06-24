@@ -41,10 +41,10 @@ type consulConfiguration struct {
 }
 
 type cloudConfiguration struct {
-	Project           string
-	Network           string
-	AllowedZones      []string `toml:"allowed_zones"`
-	UrlMap            string   `toml:"url_map"`
+	Project      string
+	Network      string
+	AllowedZones []string `toml:"allowed_zones"`
+	UrlMap       string   `toml:"url_map"`
 }
 
 type configuration struct {
@@ -151,18 +151,22 @@ func handleService(tag string, updates <-chan *registry.ServiceUpdate, wg sync.W
 					// NOTE: Create necessary DNS record sets yourself.
 
 					if err := client.CreateNetworkEndpointGroup(networkEndpointGroupName); err != nil {
+						lock.Unlock()
 						continue
 					}
 
 					if err := client.AddHealthCheck(networkEndpointGroupName, getHealthCheckPath(update.Tag)); err != nil {
+						lock.Unlock()
 						continue
 					}
 
 					if err = client.CreateBackendService(networkEndpointGroupName, tagInfo.Affinity, tagInfo.Cdn); err != nil {
+						lock.Unlock()
 						continue
 					}
 
 					if err := client.UpdateUrlMap(cfg.Cloud.UrlMap, networkEndpointGroupName, tagInfo.Host, tagInfo.Path); err != nil {
+						lock.Unlock()
 						continue
 					}
 
@@ -170,27 +174,30 @@ func handleService(tag string, updates <-chan *registry.ServiceUpdate, wg sync.W
 					glog.Infof("Watching service with tag [%s].", update.Tag)
 				}
 				lock.Unlock()
-			// todo(max): deal with delete branch
-			//case registry.DELETED:
-			//	lock.Lock()
-			//	if isRunning {
-			//		// remove everything
-			//		// todo(max): remove usage of backend service in url_map
-			//		// note: we can't remove url_map coz we didn't create it
-			//		//if err := client.RemoveLoadBalancer(serviceName); err != nil {
-			//		//	glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s] port [%s]. %s", serviceName, servicePort, err)
-			//		//}
-			//		if err := client.RemoveInstanceGroup(serviceName); err != nil {
-			//			glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while removing instance group for service [%s]. %s", serviceName, err)
-			//		}
-			//		glog.Infof("Stopped watching service [%s].", serviceName)
-			//		// reset state
-			//		serviceName = ""
-			//		servicePort = ""
-			//		isRunning = false
-			//		instances = make(map[string]*registry.ServiceInstance)
-			//	}
-			//	lock.Unlock()
+			case registry.DELETED:
+				lock.Lock()
+				if isRunning {
+					var toRemove []cloud.NetworkEndpoint
+
+					for k, instance := range instances {
+						toRemove = append(toRemove, cloud.NetworkEndpoint{
+							Instance: util.NormalizeInstanceName(instance.Host),
+							Ip:       instance.Address,
+							Port:     instance.Port,
+						})
+						delete(instances, k)
+					}
+
+					//do we have instances to remove from the NEG?
+					if len(toRemove) > 0 {
+						if err := client.RemoveEndpointsFromNetworkEndpointGroup(toRemove, networkEndpointGroupName); err != nil {
+							glog.Errorf("Failed removing instances from network endpoint group [%s]. %s", networkEndpointGroupName, err)
+						}
+					}
+
+					isRunning = false
+				}
+				lock.Unlock()
 			case registry.CHANGED:
 				lock.Lock()
 
@@ -203,59 +210,40 @@ func handleService(tag string, updates <-chan *registry.ServiceUpdate, wg sync.W
 
 				var toAdd, toRemove []cloud.NetworkEndpoint
 
-				// have all instances been removed?
-				if len(update.ServiceInstances) == 0 {
-					for _, v := range instances {
+				// finding instances to remove
+				for k, instance := range instances {
+					// Doesn't instance exist in update?
+					if _, ok := update.ServiceInstances[k]; !ok {
 						toRemove = append(toRemove, cloud.NetworkEndpoint{
-							Instance: util.NormalizeInstanceName(v.Host),
-							Ip:       v.Address,
-							Port:     v.Port,
+							Instance: util.NormalizeInstanceName(instance.Host),
+							Ip:       instance.Address,
+							Port:     instance.Port,
 						})
+						delete(instances, k)
 					}
-				} else {
-					// identify any deleted instances and remove from instance group
-					if len(update.ServiceInstances) < len(instances) {
-						glog.Warningf("Removing %d instances.", len(instances)-len(update.ServiceInstances))
-						for k := range instances {
-							if v, ok := update.ServiceInstances[k]; !ok {
-								// need to split k because Consul stores FQDN
-								toRemove = append(toRemove, cloud.NetworkEndpoint{
-									Instance: strings.Split(v.Host, ".")[0],
-									Ip:       v.Address,
-									Port:     v.Port,
-								})
-								delete(instances, k)
-								glog.Warningf("Removing instance [%s].", k)
-							}
-						}
-					}
-
-					// find new or changed instances and create or change accordingly in cloud
-					for k, v := range update.ServiceInstances {
-						if _, ok := instances[k]; !ok {
-							// new instance, create
-							glog.Warningf("Adding instance [%s].", k)
-							instances[k] = v
-							// mark as new instance for further processing
-							// need to split k because Consul stores FQDN
-							toAdd = append(toAdd, cloud.NetworkEndpoint{
-								Instance: strings.Split(v.Host, ".")[0],
-								Ip:       v.Address,
-								Port:     v.Port,
-							})
-						}
-					}
-
 				}
 
-				//do we have instances to remove from the instance group?
+				// finding instances to add
+				for k, instance := range update.ServiceInstances {
+					// Doesn't instance exist in running instances?
+					if _, ok := instances[k]; !ok {
+						toAdd = append(toAdd, cloud.NetworkEndpoint{
+							Instance: util.NormalizeInstanceName(instance.Host),
+							Ip:       instance.Address,
+							Port:     instance.Port,
+						})
+						instances[k] = instance
+					}
+				}
+
+				//do we have instances to remove from the NEG?
 				if len(toRemove) > 0 {
 					if err := client.RemoveEndpointsFromNetworkEndpointGroup(toRemove, networkEndpointGroupName); err != nil {
 						glog.Errorf("Failed removing instances from network endpoint group [%s]. %s", networkEndpointGroupName, err)
 					}
 				}
 
-				// do we have new instances to add to the instance group?
+				// do we have new instances to add to the NEG?
 				if len(toAdd) > 0 {
 					if err := client.AddEndpointsToNetworkEndpointGroup(toAdd, networkEndpointGroupName); err != nil {
 						glog.Errorf("Failed adding instances to network endpoint group [%s]. %s", networkEndpointGroupName, err)
