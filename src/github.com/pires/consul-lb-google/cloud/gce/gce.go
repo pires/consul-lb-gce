@@ -77,7 +77,7 @@ func (gce *GCEClient) CreateHttpHealthCheck(name string, path string) error {
 		path = "/"
 	}
 
-	args := []string{"gcloud", "beta", "compute", "health-checks", "create", "http", hcName, "--request-path=" + path, "--use-serving-port" /*todo(max): remove this flag, for local usage only*/, "--global"}
+	args := []string{"gcloud", "beta", "compute", "health-checks", "create", "http", hcName, "--request-path=" + path, "--use-serving-port"}
 
 	if err := util.ExecCommand(args); err != nil && !util.IsAlreadyExistsError(err) {
 		glog.Errorf("Failed creating health check [%s]. %s", hcName, err)
@@ -101,7 +101,7 @@ func (gce *GCEClient) CreateBackendService(groupName, zone, affinity string, cdn
 	hcName := makeHttpHealthCheckName(groupName)
 
 	args := []string{"gcloud", "beta", "compute", "backend-services", "create", bsName, "--global", "--health-checks", hcName,
-		/*todo(max): remote, for local usage only*/ "--global-health-checks", getCdnOption(cdn), getAffinityOption(affinity)}
+		getCdnOption(cdn), getAffinityOption(affinity)}
 
 	if err := util.ExecCommand(args); err != nil && !util.IsAlreadyExistsError(err) {
 		glog.Errorf("Failed creating backend service [%s]. %s", bsName, err)
