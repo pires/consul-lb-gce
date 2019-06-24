@@ -3,7 +3,7 @@ tag_prefix = "tagprefix-"
 
 [consul]
 url = "localhost:8500"
-tags_to_watch = [ "tagprefix-nocdn:noaffinity:subdomain.domain.tld/" ]
+tags_to_watch = [ "tagprefix-nocdn:noaffinity:subdomain.domain.com/" ]
   [consul.health_checks_paths]
   "tagprefix-nocdn:noaffinity:images2.earthtoday.com/" = "/healthcheck"
 

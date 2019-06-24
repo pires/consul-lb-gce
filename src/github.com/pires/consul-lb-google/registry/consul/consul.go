@@ -87,7 +87,7 @@ func (cr *consulRegistry) Run(upstream chan<- *registry.ServiceUpdate, done <-ch
 				upstream <- &registry.ServiceUpdate{
 					ServiceName: srv.Name,
 					UpdateType:  registry.DELETED,
-					Tag: 		 srv.tag,
+					Tag:         srv.tag,
 				}
 				break
 			}
@@ -99,7 +99,7 @@ func (cr *consulRegistry) Run(upstream chan<- *registry.ServiceUpdate, done <-ch
 				upstream <- &registry.ServiceUpdate{
 					ServiceName: srv.Name,
 					UpdateType:  registry.NEW,
-					Tag: 		 srv.tag,
+					Tag:         srv.tag,
 				}
 			}
 		}
@@ -243,7 +243,7 @@ func (cr *consulRegistry) watchService(service *consulService, upstream chan<- *
 			ServiceName:      service.Name,
 			UpdateType:       registry.CHANGED,
 			ServiceInstances: service.Instances,
-			Tag:			  service.tag,
+			Tag:              service.tag,
 		}
 		cr.Unlock()
 	}

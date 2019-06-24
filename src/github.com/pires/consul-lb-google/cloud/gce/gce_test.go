@@ -20,14 +20,14 @@ func TestGetPathRule(t *testing.T) {
 
 	paths := pathRule.Paths
 
-	if !contain(paths, path) || !contain(paths, path + "/*") || len(paths) > 2 {
+	if !contain(paths, path) || !contain(paths, path+"/*") || len(paths) > 2 {
 		t.Fail()
 	}
 
 	if pathRule.Service != backendServiceLink {
 		t.Fail()
 	}
- }
+}
 
 func contain(arrayOfStrings []string, target string) bool {
 	for _, s := range arrayOfStrings {

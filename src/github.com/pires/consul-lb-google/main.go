@@ -89,30 +89,7 @@ func main() {
 	go r.Run(updates, done)
 
 	glog.Info("Waiting for service updates..")
-	go func(updates <-chan *registry.ServiceUpdate, done chan struct{}) {
-		var wg sync.WaitGroup
-		handlers := make(map[string]chan *registry.ServiceUpdate)
-		for {
-			select {
-			case update := <-updates:
-				// is there a handler for updated service?
-				if handler, ok := handlers[update.ServiceName]; !ok {
-					// no so provision handler
-					handler = make(chan *registry.ServiceUpdate)
-					handlers[update.ServiceName] = handler
-					// start handler in its own goroutine
-					wg.Add(1)
-					go handleService(update.Tag, handler, wg, done)
-				}
-				// send update to handler
-				handlers[update.ServiceName] <- update
-			case <-done:
-				// wait for all handlers to terminate
-				wg.Wait()
-				return
-			}
-		}
-	}(updates, done)
+	go handleServices(updates, done)
 
 	// wait for Ctrl-c to stop server
 	c := make(chan os.Signal, 1)
@@ -146,7 +123,7 @@ func handleService(tag string, updates <-chan *registry.ServiceUpdate, wg sync.W
 			case registry.NEW:
 				lock.Lock()
 				if !isRunning {
-					glog.Infof("Initializing service with tag [%s]..", update.Tag)
+					glog.Infof("Initializing service with tag [%s]..", tag)
 
 					// NOTE: Create necessary DNS record sets yourself.
 
@@ -155,7 +132,7 @@ func handleService(tag string, updates <-chan *registry.ServiceUpdate, wg sync.W
 						continue
 					}
 
-					if err := client.AddHealthCheck(networkEndpointGroupName, getHealthCheckPath(update.Tag)); err != nil {
+					if err := client.AddHealthCheck(networkEndpointGroupName, getHealthCheckPath(tag)); err != nil {
 						lock.Unlock()
 						continue
 					}
@@ -171,7 +148,7 @@ func handleService(tag string, updates <-chan *registry.ServiceUpdate, wg sync.W
 					}
 
 					isRunning = true
-					glog.Infof("Watching service with tag [%s].", update.Tag)
+					glog.Infof("Watching service with tag [%s].", tag)
 				}
 				lock.Unlock()
 			case registry.DELETED:
@@ -257,6 +234,33 @@ func handleService(tag string, updates <-chan *registry.ServiceUpdate, wg sync.W
 		case <-done:
 			glog.Warningf("Received termination signal for service with tag [%s]", tag)
 			wg.Done()
+			return
+		}
+	}
+}
+
+// Handles updates for all services and dispatch them between specific per service handlers.
+func handleServices(updates <-chan *registry.ServiceUpdate, done chan struct{}) {
+	var wg sync.WaitGroup
+	handlers := make(map[string]chan *registry.ServiceUpdate)
+
+	for {
+		select {
+		case update := <-updates:
+			// is there a handler for updated service?
+			if handler, ok := handlers[update.ServiceName]; !ok {
+				// no so provision handler
+				handler = make(chan *registry.ServiceUpdate)
+				handlers[update.ServiceName] = handler
+				// start handler in its own goroutine
+				wg.Add(1)
+				go handleService(update.Tag, handler, wg, done)
+			}
+			// send update to handler
+			handlers[update.ServiceName] <- update
+		case <-done:
+			// wait for all handlers to terminate
+			wg.Wait()
 			return
 		}
 	}

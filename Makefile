@@ -2,7 +2,7 @@
 
 GOPATH=$(shell pwd)
 
-all: clean build
+all: clean build test
 
 .PHONY: install
 install:
@@ -17,8 +17,9 @@ release:
 .PHONY: clean
 clean:
 	@rm -f src/github.com/pires/consul-lb-google/consul-lb-google
-	@gofmt -s -w src
+	@gofmt -s -w src/github.com/pires/consul-lb-google
 
 .PHONY: test
 test:
-	@cd src/github.com/pires/consul-lb-google; go test -v
+	@go test github.com/pires/consul-lb-google/util github.com/pires/consul-lb-google/tagparser github.com/pires/consul-lb-google/cloud/gce
+
