@@ -3,6 +3,8 @@ package util
 import (
 	"bytes"
 	"errors"
+	"io/ioutil"
+	"net/http"
 	"os/exec"
 	"strings"
 )
@@ -34,6 +36,33 @@ func ExecCommand(arguments []string) error {
 
 func IsAlreadyExistsError(err error) bool {
 	return strings.Contains(err.Error(), "already exists")
+}
+
+func SendRequest(c *http.Client, req *http.Request, successStatusCodes []int) (*http.Response, error) {
+	response, err := c.Do(req)
+
+	if err != nil {
+		return nil, err
+	}
+
+	successStatus := false
+
+	for _, c := range successStatusCodes {
+		if c == response.StatusCode {
+			successStatus = true
+			break
+		}
+	}
+
+	if !successStatus {
+		bodyBytes, err := ioutil.ReadAll(response.Body)
+		if err != nil {
+			return nil, err
+		}
+		return nil, errors.New(string(bodyBytes))
+	}
+
+	return response, nil
 }
 
 // Take a GCE instance 'hostname' and break it down to something that can be fed

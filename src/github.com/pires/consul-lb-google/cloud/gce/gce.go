@@ -1,10 +1,12 @@
 package gce
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"github.com/pires/consul-lb-google/util"
 	"google.golang.org/api/dns/v1"
+	"net/http"
 	"strings"
 	"time"
 
@@ -32,6 +34,7 @@ var (
 
 // GCEClient is a placeholder for GCE stuff.
 type GCEClient struct {
+	httpClient *http.Client
 	service    *compute.Service
 	dnsService *dns.Service
 	projectID  string
@@ -60,6 +63,7 @@ func CreateGCECloud(project string, network string) (*GCEClient, error) {
 	// TODO validate project and network exist
 
 	return &GCEClient{
+		httpClient: client,
 		service:    svc,
 		dnsService: dnsService,
 		projectID:  project,
@@ -77,10 +81,17 @@ func (gce *GCEClient) CreateHttpHealthCheck(name string, path string) error {
 		path = "/"
 	}
 
-	args := []string{"gcloud", "beta", "compute", "health-checks", "create", "http", hcName, "--request-path=" + path, "--use-serving-port"}
+	request, err := http.NewRequest("POST", gce.makeCreateHealthCheckUrl(), gce.makeCreateHealthCheckBody(hcName, path))
 
-	if err := util.ExecCommand(args); err != nil && !util.IsAlreadyExistsError(err) {
-		glog.Errorf("Failed creating health check [%s]. %s", hcName, err)
+	if err != nil {
+		return err
+	}
+
+	request.Header.Add("Content-Type", "application/json")
+
+	_, err = util.SendRequest(gce.httpClient, request, []int{http.StatusOK, http.StatusConflict})
+
+	if err != nil {
 		return err
 	}
 
@@ -100,19 +111,17 @@ func (gce *GCEClient) CreateBackendService(groupName, zone, affinity string, cdn
 	bsName := makeBackendServiceName(zonifiedGroupName)
 	hcName := makeHttpHealthCheckName(groupName)
 
-	args := []string{"gcloud", "beta", "compute", "backend-services", "create", bsName, "--global", "--health-checks", hcName,
-		getCdnOption(cdn), getAffinityOption(affinity)}
+	request, err := http.NewRequest("POST", gce.makeCreateBackendServiceUrl(), gce.makeCreateBackendServiceBody(bsName, zonifiedGroupName, hcName, zone, cdn, getAffinityOption(affinity)))
 
-	if err := util.ExecCommand(args); err != nil && !util.IsAlreadyExistsError(err) {
-		glog.Errorf("Failed creating backend service [%s]. %s", bsName, err)
+	if err != nil {
 		return err
 	}
 
-	args = []string{"gcloud", "beta", "compute", "backend-services", "add-backend", bsName,
-		"--global", "--network-endpoint-group=" + zonifiedGroupName, "--network-endpoint-group-zone=" + zone, "--balancing-mode=RATE", "--max-rate-per-endpoint=5"}
+	request.Header.Add("Content-Type", "application/json")
 
-	if err := util.ExecCommand(args); err != nil && !util.IsAlreadyExistsError(err) {
-		glog.Errorf("Failed attaching network endpoint group [%s] to backend service [%s]. %s", zonifiedGroupName, bsName, err)
+	_, err = util.SendRequest(gce.httpClient, request, []int{http.StatusOK, http.StatusConflict})
+
+	if err != nil {
 		return err
 	}
 
@@ -205,6 +214,58 @@ func (gce *GCEClient) UpdateUrlMap(urlMapName, name, host, path string) error {
 
 func makeNetworkURL(project string, network string) string {
 	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/global/networks/%s", project, network)
+}
+
+func (gce *GCEClient) makeNetworkEndpointGroupUrl(negName, zone string) string {
+	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/networkEndpointGroups/%s", gce.projectID, zone, negName)
+}
+
+func (gce *GCEClient) makeHealthCheckUrl(healthCheckName string) string {
+	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/global/healthChecks/%s", gce.projectID, healthCheckName)
+}
+
+func (gce *GCEClient) makeCreateHealthCheckUrl() string {
+	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/global/healthChecks", gce.projectID)
+}
+
+func (gce *GCEClient) makeCreateHealthCheckBody(name, path string) *bytes.Buffer {
+	return bytes.NewBuffer([]byte(fmt.Sprintf(`{
+		"name": "%s",
+		"description": "Managed by consul-lb-google",
+		"kind": "compute#healthCheck",
+		"type": "HTTP",
+		"httpHealthCheck": {
+    		"portSpecification": "USE_SERVING_PORT",
+    		"requestPath": "%s"
+		},
+		"timeoutSec": 2,
+		"checkIntervalSec": 2,
+  		"healthyThreshold": 2,
+		"unhealthyThreshold": 2
+	}`, name, path)))
+}
+
+func (gce *GCEClient) makeCreateBackendServiceUrl() string {
+	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/global/backendServices", gce.projectID)
+}
+
+func (gce *GCEClient) makeCreateBackendServiceBody(name, groupName, healthCheckName, zone string, cdn bool, affinity string) *bytes.Buffer {
+	return bytes.NewBuffer([]byte(fmt.Sprintf(`{
+  		"name": "%s",
+  		"description": "Managed by consul-lb-google",
+  		"backends": [
+			{
+      			"group": "%s",
+      			"balancingMode": "RATE",
+      			"maxRatePerEndpoint": 5
+    		}
+		],
+  		"healthChecks": [
+			"%s"
+		],
+  		"enableCDN": %t,
+  		"sessionAffinity": "%s"
+	}`, name, gce.makeNetworkEndpointGroupUrl(groupName, zone), gce.makeHealthCheckUrl(healthCheckName), cdn, affinity)))
 }
 
 // NOTE: maximal length of resource name is 63 and name must start and end with letter or digit
@@ -332,18 +393,10 @@ func GetPathRule(path string, backendServiceLink string) *compute.PathRule {
 func getAffinityOption(affinity string) string {
 	switch affinity {
 	case "ipaffinity":
-		return "--session-affinity=" + gceAffinityTypeClientIP
+		return gceAffinityTypeClientIP
 	case "noaffinity":
-		return "--session-affinity=" + gceAffinityTypeNone
+		return gceAffinityTypeNone
 	default:
-		return ""
-	}
-}
-
-func getCdnOption(cdn bool) string {
-	if cdn {
-		return "--enable-cdn"
-	} else {
-		return ""
+		return gceAffinityTypeNone
 	}
 }

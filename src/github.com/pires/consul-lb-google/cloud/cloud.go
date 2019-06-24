@@ -69,7 +69,11 @@ func (c *gceCloud) CreateNetworkEndpointGroup(groupName string) error {
 }
 
 func (c *gceCloud) AddHealthCheck(groupName, path string) error {
-	return c.client.CreateHttpHealthCheck(groupName, path)
+	if err := c.client.CreateHttpHealthCheck(groupName, path); err != nil {
+		glog.Errorf("Failed creating health check. %s", err)
+		return err
+	}
+	return nil
 }
 
 func (c *gceCloud) AddEndpointsToNetworkEndpointGroup(endpoints []NetworkEndpoint, groupName string) error {
