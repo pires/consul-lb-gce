@@ -104,6 +104,7 @@ func (c *gceCloud) CreateBackendService(groupName string, affinity string, cdn b
 	for _, zone := range c.zones {
 		err := c.client.CreateBackendService(groupName, zone, affinity, cdn)
 		if err != nil {
+			glog.Errorf("Failed creating backend service. %s", err)
 			return err
 		}
 	}
@@ -116,6 +117,7 @@ func (c *gceCloud) UpdateUrlMap(urlMapName, groupName string, host, path string)
 	for _, zone := range c.zones {
 		err := c.client.UpdateUrlMap(urlMapName, util.Zonify(zone, groupName), host, path)
 		if err != nil {
+			glog.Errorf("Failed updating url map [%s]. %s", urlMapName, err)
 			return err
 		}
 	}
