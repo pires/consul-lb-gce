@@ -1,11 +1,10 @@
 package gce
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
+	"github.com/pires/consul-lb-google/util"
 	"google.golang.org/api/dns/v1"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -18,14 +17,11 @@ import (
 )
 
 const (
-	gceAffinityTypeNone = "NONE"
-	// AffinityTypeClientIP - affinity based on Client IP.
+	gceAffinityTypeNone     = "NONE"
 	gceAffinityTypeClientIP = "CLIENT_IP"
 
 	operationPollInterval        = 3 * time.Second
 	operationPollTimeoutDuration = 30 * time.Minute
-
-	servicePort = "service-port"
 
 	maxResourceNameLength = 63
 )
@@ -71,85 +67,23 @@ func CreateGCECloud(project string, network string) (*GCEClient, error) {
 	}, nil
 }
 
-// ListInstancesInZone returns all instances in a zone
-func (gce *GCEClient) ListInstancesInZone(zone string) (*compute.InstanceList, error) {
-	return gce.service.Instances.List(gce.projectID, zone).Do()
-}
-
-// CreateInstanceGroupForZone creates an instance group with the given instances for the given zone.
-func (gce *GCEClient) CreateInstanceGroupForZone(name string, zone string, ports map[string]int64) error {
-	// defined NamedPorts
-	namedPorts := make([]*compute.NamedPort, len(ports))
-	for name, port := range ports {
-		namedPorts = append(namedPorts, &compute.NamedPort{
-			Name: name,
-			Port: port,
-		})
-	}
-
-	// define InstanceGroup
-	ig := &compute.InstanceGroup{
-		Name:       name,
-		NamedPorts: namedPorts,
-		Network:    gce.networkURL}
-
-	op, err := gce.service.InstanceGroups.Insert(gce.projectID, zone, ig).Do()
-	if err != nil {
-		return err
-	}
-	if err = gce.waitForZoneOp(op, zone); err != nil {
-		return err
-	}
-	return nil
-}
-
-// DeleteInstanceGroupForZone deletes an instance group for the given zone.
-func (gce *GCEClient) DeleteInstanceGroupForZone(name string, zone string) error {
-	op, err := gce.service.InstanceGroups.Delete(
-		gce.projectID, zone, name).Do()
-	if err != nil {
-		return err
-	}
-	return gce.waitForZoneOp(op, zone)
-}
-
-// ListInstanceGroupsForzone lists all InstanceGroups in the project for the given zone.
-func (gce *GCEClient) ListInstanceGroupsForZone(zone string) (*compute.InstanceGroupList, error) {
-	return gce.service.InstanceGroups.List(gce.projectID, zone).Do()
-}
-
-// ListInstancesInInstanceGroupForZone lists all the instances in a given instance group for the given zone.
-func (gce *GCEClient) ListInstancesInInstanceGroupForZone(name string, zone string) (*compute.InstanceGroupsListInstances, error) {
-	return gce.service.InstanceGroups.ListInstances(
-		gce.projectID, zone, name,
-		&compute.InstanceGroupsListInstancesRequest{}).Do()
-}
-
-// GetInstanceGroupForZone returns an instance group by name for zone.
-func (gce *GCEClient) GetInstanceGroupForZone(name string, zone string) (*compute.InstanceGroup, error) {
-	return gce.service.InstanceGroups.Get(gce.projectID, zone, name).Do()
-}
-
-// GetAvailableZones returns all available zones for this project
-func (gce *GCEClient) GetAvailableZones() (*compute.ZoneList, error) {
-	return gce.service.Zones.List(gce.projectID).Do()
-}
-
 // HttpHealthCheck Management
 
 // CreateHttpHealthCheck creates the given HttpHealthCheck.
 func (gce *GCEClient) CreateHttpHealthCheck(name string, path string) error {
 	hcName := makeHttpHealthCheckName(name)
+
 	if path == "" {
 		path = "/"
 	}
-	cmd := exec.Command("gcloud", "beta", "compute", "health-checks", "create", "http", hcName, "--request-path="+path, "--use-serving-port")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	if err != nil {
-		glog.Errorf("Failed creating health check [%s]. %s", hcName, stderr.String())
+
+	args := []string{"gcloud", "beta", "compute", "health-checks", "create", "http", hcName, "--request-path=" + path, "--use-serving-port", /*todo(max): remove this flag, for local usage only*/ "--global"}
+
+	if err := util.ExecCommand(args); err != nil && !util.IsAlreadyExistsError(err) {
+		glog.Errorf("Failed creating health check [%s]. %s", hcName, err)
+		return err
 	}
+
 	return nil
 }
 
@@ -159,6 +93,30 @@ func (gce *GCEClient) CreateHttpHealthCheck(name string, path string) error {
 func (gce *GCEClient) GetBackendService(name string) (*compute.BackendService, error) {
 	bsName := makeBackendServiceName(name)
 	return gce.service.BackendServices.Get(gce.projectID, bsName).Do()
+}
+
+func (gce *GCEClient) CreateBackendService(groupName, zone, affinity string, cdn bool) error {
+	zonifiedGroupName := util.Zonify(zone, groupName)
+	bsName := makeBackendServiceName(zonifiedGroupName)
+	hcName := makeHttpHealthCheckName(groupName)
+
+	args := []string{"gcloud", "beta", "compute", "backend-services", "create", bsName, "--global", "--health-checks", hcName,
+		/*todo(max): remote, for local usage only*/ "--global-health-checks", getCdnOption(cdn), getAffinityOption(affinity)}
+
+	if err := util.ExecCommand(args); err != nil && !util.IsAlreadyExistsError(err) {
+		glog.Errorf("Failed creating backend service [%s]. %s", bsName, err)
+		return err
+	}
+
+	args = []string{"gcloud", "beta", "compute", "backend-services", "add-backend", bsName,
+		"--global", "--network-endpoint-group=" + zonifiedGroupName, "--network-endpoint-group-zone=" + zone, "--balancing-mode=RATE", "--max-rate-per-endpoint=5"}
+
+	if err := util.ExecCommand(args); err != nil && !util.IsAlreadyExistsError(err) {
+		glog.Errorf("Failed attaching network endpoint group [%s] to backend service [%s]. %s", zonifiedGroupName, bsName, err)
+		return err
+	}
+
+	return nil
 }
 
 // UrlMap management
@@ -195,13 +153,14 @@ func (gce *GCEClient) UpdateUrlMap(urlMapName, name, host, path string) error {
 			break
 		}
 	}
-	var defaultServiceLink string
-	if path == "/" {
-		defaultServiceLink = backend.SelfLink
-	} else {
-		defaultServiceLink = urlMap.DefaultService
-	}
 	if existingPathMatcher == nil {
+		var defaultServiceLink string
+		if path == "/" {
+			defaultServiceLink = backend.SelfLink
+		} else {
+			defaultServiceLink = urlMap.DefaultService
+		}
+
 		urlMap.PathMatchers = append(urlMap.PathMatchers, &compute.PathMatcher{
 			Name:           pathMatcherName,
 			DefaultService: defaultServiceLink,
@@ -214,7 +173,7 @@ func (gce *GCEClient) UpdateUrlMap(urlMapName, name, host, path string) error {
 	// create path matcher if it doesn't exist
 	var existingHostRule *compute.HostRule
 	for _, hr := range urlMap.HostRules {
-		if hr.Description == pathMatcherName {
+		if hr.Description == host {
 			existingHostRule = hr
 			break
 		}
@@ -244,25 +203,8 @@ func (gce *GCEClient) UpdateUrlMap(urlMapName, name, host, path string) error {
 
 // helper methods
 
-// Take a GCE instance 'hostname' and break it down to something that can be fed
-// to the GCE API client library.  Basically this means reducing 'kubernetes-
-// minion-2.c.my-proj.internal' to 'kubernetes-minion-2' if necessary.
-func canonicalizeInstanceName(name string) string {
-	ix := strings.Index(name, ".")
-	if ix != -1 {
-		name = name[:ix]
-	}
-	return name
-}
-
 func makeNetworkURL(project string, network string) string {
 	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/global/networks/%s", project, network)
-}
-
-func makeHostURL(projectID, zone, host string) string {
-	host = canonicalizeInstanceName(host)
-	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/instances/%s",
-		projectID, zone, host)
 }
 
 // NOTE: maximal length of resource name is 63 and name must start and end with letter or digit
@@ -277,45 +219,12 @@ func makeName(prefix string, name string) string {
 	return n
 }
 
-func makeFirewallName(name string) string {
-	return makeName("fw", name)
-}
-
 func makeHttpHealthCheckName(name string) string {
 	return makeName("http-hc", name)
 }
 
 func makeBackendServiceName(name string) string {
 	return makeName("backend", name)
-}
-
-func makeHttpsHealthCheckName(name string) string {
-	return makeName("https-hc", name)
-}
-
-func makeHttpProxyName(name string) string {
-	return makeName("http-proxy", name)
-}
-
-func makeForwardingRuleName(name string) string {
-	return makeName("fwd-rule", name)
-}
-
-// makeFirewallObject returns a pre-populated instance of *computeFirewall
-func (gce *GCEClient) makeFirewallObject(name string, allowedPorts []string) (*compute.Firewall, error) {
-	firewall := &compute.Firewall{
-		Name:         name,
-		Description:  "Generated by consul-lb-gce",
-		Network:      gce.networkURL,
-		SourceRanges: []string{"130.211.0.0/22"}, // allow load-balancers alone
-		Allowed: []*compute.FirewallAllowed{
-			{
-				IPProtocol: "tcp",
-				Ports:      allowedPorts,
-			},
-		},
-	}
-	return firewall, nil
 }
 
 func isHTTPErrorCode(err error, code int) bool {
@@ -362,18 +271,6 @@ func getErrorFromOp(op *compute.Operation) error {
 func (gce *GCEClient) waitForGlobalOp(op *compute.Operation) error {
 	return waitForOp(op, func(operationName string) (*compute.Operation, error) {
 		return gce.service.GlobalOperations.Get(gce.projectID, operationName).Do()
-	})
-}
-
-func (gce *GCEClient) waitForRegionOp(op *compute.Operation, region string) error {
-	return waitForOp(op, func(operationName string) (*compute.Operation, error) {
-		return gce.service.RegionOperations.Get(gce.projectID, region, operationName).Do()
-	})
-}
-
-func (gce *GCEClient) waitForZoneOp(op *compute.Operation, zone string) error {
-	return waitForOp(op, func(operationName string) (*compute.Operation, error) {
-		return gce.service.ZoneOperations.Get(gce.projectID, zone, operationName).Do()
 	})
 }
 
@@ -429,35 +326,6 @@ func GetPathRule(path string, backendServiceLink string) *compute.PathRule {
 		Paths:   paths,
 		Service: backendServiceLink,
 	}
-}
-
-func (gce *GCEClient) CreateBackendService(zonifiedGroupName, groupName, zone, affinity string, cdn bool) error {
-	bsName := makeBackendServiceName(zonifiedGroupName)
-	hcName := makeHttpHealthCheckName(groupName)
-
-	cmd := exec.Command("gcloud", "beta", "compute", "backend-services", "create", bsName, "--global", "--health-checks", hcName, getCdnOption(cdn), getAffinityOption(affinity))
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	if err != nil {
-		glog.Errorf("Failed creating backend service [%s]. %s", bsName, stderr.String())
-		if !strings.Contains(stderr.String(), "already exists") {
-			return err
-		}
-	}
-
-	cmd = exec.Command("gcloud", "beta", "compute", "backend-services", "add-backend", bsName,
-		"--global", "--network-endpoint-group="+zonifiedGroupName, "--network-endpoint-group-zone="+zone, "--balancing-mode=RATE", "--max-rate-per-endpoint=5")
-	stderr = bytes.Buffer{}
-	cmd.Stderr = &stderr
-	err = cmd.Run()
-	if err != nil {
-		glog.Errorf("Failed attaching network endpoint group [%s] to backend service [%s]. %s", groupName, bsName, stderr.String())
-		if !strings.Contains(stderr.String(), "already exists") {
-			return err
-		}
-	}
-	return nil
 }
 
 func getAffinityOption(affinity string) string {

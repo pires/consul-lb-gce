@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/pires/consul-lb-google/util"
 	"os"
 	"os/signal"
 	"strings"
@@ -44,8 +45,6 @@ type cloudConfiguration struct {
 	Network           string
 	AllowedZones      []string `toml:"allowed_zones"`
 	UrlMap            string   `toml:"url_map"`
-	DnsManagedZone    string   `toml:"dns_managed_zone"`
-	GlobalAddressName string   `toml:"global_address_name"`
 }
 
 type configuration struct {
@@ -103,7 +102,7 @@ func main() {
 					handlers[update.ServiceName] = handler
 					// start handler in its own goroutine
 					wg.Add(1)
-					go handleService(update.ServiceName, handler, wg, done)
+					go handleService(update.Tag, handler, wg, done)
 				}
 				// send update to handler
 				handlers[update.ServiceName] <- update
@@ -127,64 +126,48 @@ func main() {
 
 // handleService handles service updates in a consistent way.
 // It will run until service is deleted or done is closed.
-func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.WaitGroup, done chan struct{}) {
-	// service model
+func handleService(tag string, updates <-chan *registry.ServiceUpdate, wg sync.WaitGroup, done chan struct{}) {
+	tagInfo, err := tagParser.Parse(tag)
+
+	if err != nil {
+		glog.Errorf("Failed parsing tag [%s]. %s", tag, err)
+	}
+
+	networkEndpointGroupName := getNetworkEndpointGroupName(tagInfo)
+
 	lock := &sync.RWMutex{}
-	var serviceName string
 	isRunning := false
 	instances := make(map[string]*registry.ServiceInstance)
 
 	for {
 		select {
 		case update := <-updates:
-			tagInfo, parseErr := tagParser.Parse(update.Tag)
-
-			if parseErr != nil {
-				glog.Errorf("There was an error while parsing service tag [%s]. %s", update.Tag, err)
-			}
-
-			networkEndpointGroupName := getNetworkEndpointGroupName(tagInfo)
-
 			switch update.UpdateType {
 			case registry.NEW:
 				lock.Lock()
 				if !isRunning {
 					glog.Infof("Initializing service with tag [%s]..", update.Tag)
 
-					// todo(max): create backend service also
+					// NOTE: Create necessary DNS record sets yourself.
 
 					if err := client.CreateNetworkEndpointGroup(networkEndpointGroupName); err != nil {
-						glog.Errorf("There was an error while creating network endpoint group [%s]. %s", networkEndpointGroupName, err)
-					} else {
-						// NOTE: Create DNS needed record sets yourself.
-
-						finalHealthCheckPath := ""
-
-						if healthCheckPath, ok := cfg.Consul.HealthChecksPaths[update.Tag]; ok {
-							finalHealthCheckPath = healthCheckPath
-						}
-
-						err := client.AddHealthCheck(networkEndpointGroupName, finalHealthCheckPath)
-
-						if err != nil {
-							glog.Errorf("Failed creating health check. %s", err)
-						}
-
-						err = client.CreateBackendServiceWithNetworkEndpointGroup(networkEndpointGroupName, tagInfo.Affinity, tagInfo.Cdn)
-
-						if err != nil {
-							glog.Errorf("Failed creating backend service. %s", err)
-							continue
-						}
-
-						if err := client.UpdateLoadBalancer(cfg.Cloud.UrlMap, networkEndpointGroupName, tagInfo.Host, tagInfo.Path); err != nil {
-							glog.Errorf("HUMAN INTERVENTION REQUIRED: There was an error while propagating network changes for service [%s]. %s", serviceName, err)
-							continue
-						}
-
-						isRunning = true
-						glog.Infof("Watching service with tag [%s].", update.Tag)
+						continue
 					}
+
+					if err := client.AddHealthCheck(networkEndpointGroupName, getHealthCheckPath(update.Tag)); err != nil {
+						continue
+					}
+
+					if err = client.CreateBackendService(networkEndpointGroupName, tagInfo.Affinity, tagInfo.Cdn); err != nil {
+						continue
+					}
+
+					if err := client.UpdateUrlMap(cfg.Cloud.UrlMap, networkEndpointGroupName, tagInfo.Host, tagInfo.Path); err != nil {
+						continue
+					}
+
+					isRunning = true
+					glog.Infof("Watching service with tag [%s].", update.Tag)
 				}
 				lock.Unlock()
 			// todo(max): deal with delete branch
@@ -213,7 +196,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 
 				// validate if we've created the instance group for this service
 				if !isRunning {
-					glog.Warningf("Ignoring received event for unwatched service [%s].", serviceName)
+					glog.Warningf("Ignoring received event for service with tag [%s] because it's not running.", tag)
 					lock.Unlock()
 					break
 				}
@@ -223,9 +206,8 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 				// have all instances been removed?
 				if len(update.ServiceInstances) == 0 {
 					for _, v := range instances {
-						// need to split k because Consul stores FQDN
 						toRemove = append(toRemove, cloud.NetworkEndpoint{
-							Instance: strings.Split(v.Host, ".")[0],
+							Instance: util.NormalizeInstanceName(v.Host),
 							Ip:       v.Address,
 							Port:     v.Port,
 						})
@@ -269,14 +251,14 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 				//do we have instances to remove from the instance group?
 				if len(toRemove) > 0 {
 					if err := client.RemoveEndpointsFromNetworkEndpointGroup(toRemove, networkEndpointGroupName); err != nil {
-						glog.Errorf("There was an error while removing instances from network endpoint group [%s]. %s", networkEndpointGroupName, err)
+						glog.Errorf("Failed removing instances from network endpoint group [%s]. %s", networkEndpointGroupName, err)
 					}
 				}
 
 				// do we have new instances to add to the instance group?
 				if len(toAdd) > 0 {
 					if err := client.AddEndpointsToNetworkEndpointGroup(toAdd, networkEndpointGroupName); err != nil {
-						glog.Errorf("There was an error while adding instances to network endpoint group [%s]. %s", networkEndpointGroupName, err)
+						glog.Errorf("Failed adding instances to network endpoint group [%s]. %s", networkEndpointGroupName, err)
 					}
 				}
 
@@ -285,7 +267,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 				continue
 			}
 		case <-done:
-			glog.Warningf("Received termination signal for service [%s]", serviceName)
+			glog.Warningf("Received termination signal for service with tag [%s]", tag)
 			wg.Done()
 			return
 		}
@@ -293,7 +275,7 @@ func handleService(name string, updates <-chan *registry.ServiceUpdate, wg sync.
 }
 
 func getNetworkEndpointGroupName(tagInfo tagparser.TagInfo) string {
-	return fmt.Sprintf("proxy-%s-%s-%s", getCdnType(tagInfo.Cdn), tagInfo.Affinity, normalizeHost(tagInfo.Host))
+	return fmt.Sprintf("neg-%s-%s-%s", getCdnType(tagInfo.Cdn), tagInfo.Affinity, normalizeHost(tagInfo.Host))
 }
 
 func getCdnType(cdn bool) string {
@@ -306,4 +288,12 @@ func getCdnType(cdn bool) string {
 
 func normalizeHost(host string) string {
 	return strings.Replace(host, ".", "-", -1)
+}
+
+func getHealthCheckPath(tag string) string {
+	if healthCheckPath, ok := cfg.Consul.HealthChecksPaths[tag]; ok {
+		return healthCheckPath
+	}
+
+	return ""
 }

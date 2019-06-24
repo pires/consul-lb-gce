@@ -1,43 +1,29 @@
 package cloud
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
-	"github.com/pires/consul-lb-google/util"
-	"os/exec"
-	"strings"
-
 	"github.com/golang/glog"
 	"github.com/pires/consul-lb-google/cloud/gce"
-)
-
-var (
-	ErrCantCreateInstanceGroup     = errors.New("Can't create instance group")
-	ErrCantRemoveInstanceGroup     = errors.New("Can't remove instance group")
-	ErrUnknownInstanceGroup        = errors.New("Unknown instance group")
-	ErrUnknownInstanceInGroup      = errors.New("Unknown instance in instance group")
-	ErrCantSetPortForInstanceGroup = errors.New("Can't set port for instance group")
+	"github.com/pires/consul-lb-google/util"
 )
 
 type Cloud interface {
-	CreateDnsRecordSet(managedZone, globalAddressName, host string) error
-
 	// CreateNetworkEndpointGroup creates an network endpoint group
 	CreateNetworkEndpointGroup(groupName string) error
 
 	AddHealthCheck(groupName, path string) error
 
-	// AddEndpointsToNetworkEndpointGroup adds a set of endpoints to an network endpoint group
+	// Adds a set of endpoints to a network endpoint group
 	AddEndpointsToNetworkEndpointGroup(endpoints []NetworkEndpoint, groupName string) error
 
-	// RemoveEndpointsFromNetworkEndpointGroup removes a set of endpoints from an network endpoint group
+	// Removes a set of endpoints from a network endpoint group
 	RemoveEndpointsFromNetworkEndpointGroup(endpoints []NetworkEndpoint, groupName string) error
 
-	CreateBackendServiceWithNetworkEndpointGroup(groupName string, affinity string, cdn bool) error
+	// Creates backend service with network endpoint group as backend with affinity and cdn properties
+	CreateBackendService(groupName, affinity string, cdn bool) error
 
-	// UpdateLoadBalancer updates existing load-balancer related to an instance group
-	UpdateLoadBalancer(urlMapName, groupName, host, path string) error
+	// Updates existing load-balancer related to a group
+	UpdateUrlMap(urlMapName, groupName, host, path string) error
 }
 
 type NetworkEndpoint struct {
@@ -46,37 +32,44 @@ type NetworkEndpoint struct {
 	Port     string
 }
 
-type instanceGroup struct {
-	// name of the instance group
-	name string
-	// map of instances in the instance group
-	instances map[string]string
-}
-
 type gceCloud struct {
-	// GCE client
 	client *gce.GCEClient
 
 	// zones available to this project
 	zones []string
-
-	// one instance group identifier represents n instance groups, one per available zone
-	// e.g. groups := instanceGroups["myIG"]["europe-west1-d"]
-	instanceGroups map[string]map[string]*instanceGroup
 }
 
 func New(projectID string, network string, allowedZones []string) (Cloud, error) {
-	// try and provision GCE client
 	c, err := gce.CreateGCECloud(projectID, network)
 	if err != nil {
 		return nil, err
 	}
 
 	return &gceCloud{
-		client:         c,
-		zones:          allowedZones,
-		instanceGroups: make(map[string]map[string]*instanceGroup),
+		client: c,
+		zones:  allowedZones,
 	}, nil
+}
+
+func (c *gceCloud) CreateNetworkEndpointGroup(groupName string) error {
+	for _, zone := range c.zones {
+		finalGroupName := util.Zonify(zone, groupName)
+
+		args := []string{"gcloud", "beta", "compute", "network-endpoint-groups", "create", finalGroupName, "--zone=" + zone, "--network=default", "--subnet=default", "--default-port=80"}
+
+		if err := util.ExecCommand(args); err != nil && !util.IsAlreadyExistsError(err) {
+			glog.Errorf("Failed creating network endpoint group [%s]. %s", finalGroupName, err)
+			return err
+		}
+	}
+
+	glog.Infof("Created network endpoint group [%s]", groupName)
+
+	return nil
+}
+
+func (c *gceCloud) AddHealthCheck(groupName, path string) error {
+	return c.client.CreateHttpHealthCheck(groupName, path)
 }
 
 func (c *gceCloud) AddEndpointsToNetworkEndpointGroup(endpoints []NetworkEndpoint, groupName string) error {
@@ -86,19 +79,18 @@ func (c *gceCloud) AddEndpointsToNetworkEndpointGroup(endpoints []NetworkEndpoin
 		finalGroupName := util.Zonify(zone, groupName)
 
 		for _, endpoint := range endpoints {
-			cmd := exec.Command("gcloud", "beta", "compute", "network-endpoint-groups", "update",
-				finalGroupName, "--zone="+zone, "--add-endpoint", fmt.Sprintf("instance=%s,ip=%s,port=%s", endpoint.Instance, endpoint.Ip, endpoint.Port))
+			endpointSignature := fmt.Sprintf("instance=%s,ip=%s,port=%s", endpoint.Instance, endpoint.Ip, endpoint.Port)
 
-			var stderr bytes.Buffer
-			cmd.Stderr = &stderr
-			err := cmd.Run()
-			if err != nil {
-				glog.Errorf("Failed adding endpoint to network endpoint group [%s]. %s", finalGroupName, stderr.String())
+			args := []string{"gcloud", "beta", "compute", "network-endpoint-groups", "update",
+				finalGroupName, "--zone=" + zone, "--add-endpoint", endpointSignature}
+
+			if err := util.ExecCommand(args); err != nil {
+				glog.Errorf("Failed adding endpoint to network endpoint group [%s]. %s", finalGroupName, err)
+			} else {
+				glog.Infof("Added network endpoint [%s] into network endpoint group [%s]", endpointSignature, finalGroupName)
 			}
 		}
 	}
-
-	glog.Infof("Added %d network endpoints into network endpoint group [%s]", len(endpoints), groupName)
 
 	return nil
 }
@@ -107,43 +99,9 @@ func (c *gceCloud) RemoveEndpointsFromNetworkEndpointGroup(endpoints []NetworkEn
 	return nil
 }
 
-func (c *gceCloud) CreateDnsRecordSet(managedZone, globalAddressName, host string) error {
-	// Possible error: 'googleapi: Error 403: Request had insufficient authentication scopes., forbidden'
-	if err := c.client.AddDnsRecordSet(managedZone, globalAddressName, host); err != nil {
-		return err
-	}
-	glog.Infof("Created DNS record set successfully [%s] ", host)
-	return nil
-}
-
-func (c *gceCloud) CreateNetworkEndpointGroup(groupName string) error {
+func (c *gceCloud) CreateBackendService(groupName string, affinity string, cdn bool) error {
 	for _, zone := range c.zones {
-		finalGroupName := util.Zonify(zone, groupName)
-		cmd := exec.Command("gcloud", "beta", "compute", "network-endpoint-groups", "create", finalGroupName, "--zone="+zone, "--network=default", "--subnet=default", "--default-port=80")
-		var stderr bytes.Buffer
-		cmd.Stderr = &stderr
-		err := cmd.Run()
-		if err != nil {
-			if strings.Contains(stderr.String(), "already exists") {
-				continue
-			} else {
-				glog.Errorf("Failed creating of network endpoint group [%s]. %s", finalGroupName, stderr.String())
-				return err
-			}
-		}
-	}
-
-	glog.Infof("Created network endpoint group [%s] successfully", groupName)
-
-	// todo(max): add health check
-
-	return nil
-}
-
-func (c *gceCloud) CreateBackendServiceWithNetworkEndpointGroup(groupName string, affinity string, cdn bool) error {
-	for _, zone := range c.zones {
-		finalGroupName := util.Zonify(zone, groupName)
-		err := c.client.CreateBackendService(finalGroupName, groupName, zone, affinity, cdn)
+		err := c.client.CreateBackendService(groupName, zone, affinity, cdn)
 		if err != nil {
 			return err
 		}
@@ -151,18 +109,17 @@ func (c *gceCloud) CreateBackendServiceWithNetworkEndpointGroup(groupName string
 	return nil
 }
 
-func (c *gceCloud) UpdateLoadBalancer(urlMapName, groupName string, host, path string) error {
-	glog.Infof("Updating load-balancer for [%s].", groupName)
+func (c *gceCloud) UpdateUrlMap(urlMapName, groupName string, host, path string) error {
+	glog.Infof("Updating url map [%s].", urlMapName)
+
 	for _, zone := range c.zones {
-		err := c.client.UpdateLoadBalancer(urlMapName, util.Zonify(zone, groupName), host, path)
+		err := c.client.UpdateUrlMap(urlMapName, util.Zonify(zone, groupName), host, path)
 		if err != nil {
 			return err
 		}
 	}
-	glog.Infof("Load-balancer [%s] updated successfully.", groupName)
-	return nil
-}
 
-func (c *gceCloud) AddHealthCheck(groupName, path string) error {
-	return c.client.CreateHttpHealthCheck(groupName, path)
+	glog.Infof("Updated url map [%s]", urlMapName)
+
+	return nil
 }
