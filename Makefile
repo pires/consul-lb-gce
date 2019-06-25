@@ -1,28 +1,25 @@
-GOPATH=$(shell pwd):$(shell pwd)/vendor
+.EXPORT_ALL_VARIABLES:
 
-all: clean build
+GOPATH=$(shell pwd)
+
+all: clean build test
+
+.PHONY: install
+install:
+	@cd src/github.com/pires/consul-lb-google; glide install
 
 build:
-	GOARCH=amd64 gb build all
+	@cd src/github.com/pires/consul-lb-google; go build
+
+release:
+	@cd src/github.com/pires/consul-lb-google; GOOS=linux GOARCH=amd64 go build
 
 .PHONY: clean
 clean:
-	@rm -rf ./{bin,pkg}
-	@gofmt -s -w src
-
-.PHONY: release
-release: clean
-	GOOS=linux GOARCH=amd64 gb build -ldflags '-w -extldflags=-static'
+	@rm -f src/github.com/pires/consul-lb-google/consul-lb-google
+	@gofmt -s -w src/github.com/pires/consul-lb-google
 
 .PHONY: test
 test:
-	@gb test -v
+	@go test github.com/pires/consul-lb-google/util github.com/pires/consul-lb-google/tagparser github.com/pires/consul-lb-google/cloud/gce
 
-#
-# Use COVPKG env var to set which package to run coverage
-#
-.PHONY: coverage
-coverage:
-	go test -v -coverprofile cover.out github.com/pires/consul-lb-google/${COVPKG}
-	@go tool cover -html=cover.out -o coverage.html
-	@rm cover.out

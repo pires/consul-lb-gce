@@ -1,290 +1,128 @@
 package cloud
 
 import (
-	"errors"
-	"strings"
-
 	"github.com/golang/glog"
 	"github.com/pires/consul-lb-google/cloud/gce"
-)
-
-var (
-	ErrCantCreateInstanceGroup     = errors.New("Can't create instance group")
-	ErrCantRemoveInstanceGroup     = errors.New("Can't remove instance group")
-	ErrUnknownInstanceGroup        = errors.New("Unknown instance group")
-	ErrUnknownInstanceInGroup      = errors.New("Unknown instance in instance group")
-	ErrCantSetPortForInstanceGroup = errors.New("Can't set port for instance group")
+	"github.com/pires/consul-lb-google/util"
 )
 
 type Cloud interface {
-	// CreateInstanceGroup creates an instance group
-	CreateInstanceGroup(groupName string) error
+	// CreateNetworkEndpointGroup creates an network endpoint group
+	CreateNetworkEndpointGroup(groupName string) error
 
-	// RemoveInstanceGroup removes an instance group
-	RemoveInstanceGroup(groupName string) error
+	AddHealthCheck(groupName, path string) error
 
-	// AddInstancesToInstanceGroup adds a sert of instances to an instance group
-	AddInstancesToInstanceGroup(instanceNames []string, groupName string) error
+	// Adds a set of endpoints to a network endpoint group
+	AddEndpointsToNetworkEndpointGroup(endpoints []gce.NetworkEndpoint, groupName string) error
 
-	// RemoveInstancesFromInstanceGroup removes a set of instances from an instance group
-	RemoveInstancesFromInstanceGroup(instanceNames []string, groupName string) error
+	// Removes a set of endpoints from a network endpoint group
+	RemoveEndpointsFromNetworkEndpointGroup(endpoints []gce.NetworkEndpoint, groupName string) error
 
-	// SetPortForInstanceGroup sets the port on an instance group
-	SetPortForInstanceGroup(port int64, groupName string) error
+	// Creates backend service with network endpoint group as backend with affinity and cdn properties
+	CreateBackendService(groupName, affinity string, cdn bool) error
 
-	// CreateOrUpdateLoadBalancer creates a new or updates existing load-balancer related to an instance group
-	CreateOrUpdateLoadBalancer(groupName string, port string) error
-
-	// RemoveLoadBalancer removes an existing load-balancer related to an instance group
-	RemoveLoadBalancer(groupName string) error
-}
-
-type instanceGroup struct {
-	// name of the instance group
-	name string
-	// map of instances in the instance group
-	instances map[string]string
+	// Updates existing load-balancer related to a group
+	UpdateUrlMap(urlMapName, groupName, host, path string) error
 }
 
 type gceCloud struct {
-	// GCE client
 	client *gce.GCEClient
 
 	// zones available to this project
 	zones []string
-
-	// one instance group identifier represents n instance groups, one per available zone
-	// e.g. groups := instanceGroups["myIG"]["europe-west1-d"]
-	instanceGroups map[string]map[string]*instanceGroup
 }
 
 func New(projectID string, network string, allowedZones []string) (Cloud, error) {
-	// try and provision GCE client
 	c, err := gce.CreateGCECloud(projectID, network)
 	if err != nil {
 		return nil, err
 	}
 
 	return &gceCloud{
-		client:         c,
-		zones:          allowedZones,
-		instanceGroups: make(map[string]map[string]*instanceGroup),
+		client: c,
+		zones:  allowedZones,
 	}, nil
 }
 
-func (c *gceCloud) CreateInstanceGroup(groupName string) error {
-	// create one instance-group per zone
-	cleanup := false
-	glog.Infof("Creating instance groups for [%s]..", groupName)
+func (c *gceCloud) CreateNetworkEndpointGroup(groupName string) error {
 	for _, zone := range c.zones {
-		finalGroupName := zonify(zone, groupName)
-		glog.Infof("Creating instance group [%s] in zone [%s].", finalGroupName, zone)
-		if err := c.client.CreateInstanceGroupForZone(finalGroupName, zone /*TODO define ports*/, make(map[string]int64)); err == nil {
-			m := make(map[string]*instanceGroup, 1)
-			m[finalGroupName] = &instanceGroup{} // empty
-			c.instanceGroups[zone] = m
-		} else {
-			glog.Errorf("There was an error creating instance group [%s] in zone [%s]. Error: %s", finalGroupName, zone, err)
-			cleanup = true
-			break
+		finalGroupName := util.Zonify(zone, groupName)
+
+		if err := c.client.CreateNetworkEndpointGroup(finalGroupName, zone); err != nil {
+			glog.Errorf("Failed creating network endpoint group [%s]. %s", finalGroupName, err)
 		}
 	}
 
-	// need to clean-up?
-	if cleanup {
-		glog.Warningf("Rollback instance group creation for [%s]..", groupName)
-		// delete created instance groups
-		c.RemoveInstanceGroup(groupName)
-		return ErrCantCreateInstanceGroup
-	}
-
-	glog.Infof("Created instance groups for [%s] successfully", groupName)
+	glog.Infof("Created network endpoint group [%s]", groupName)
 
 	return nil
 }
 
-func (c *gceCloud) RemoveInstanceGroup(groupName string) error {
-	// remove one instance-group per zone
-	cleanup := false
-	glog.Infof("Removing instance groups for [%s]..", groupName)
-	// delete created instance groups
-	for _, zone := range c.zones {
-		if _, ok := c.instanceGroups[zone]; ok {
-			finalGroupName := zonify(zone, groupName)
-			if err := c.client.DeleteInstanceGroupForZone(finalGroupName, zone); err == nil {
-				glog.Warningf("Removed instance group [%s] from zone [%s].", finalGroupName, zone)
-			} else {
-				glog.Errorf("HUMAN INTERVERTION REQUIRED: Failed to remove instance group [%s] from zone [%s]. Error: %s", finalGroupName, zone, err)
-				cleanup = true
-			}
-		}
+func (c *gceCloud) AddHealthCheck(groupName, path string) error {
+	if err := c.client.CreateHttpHealthCheck(groupName, path); err != nil {
+		glog.Errorf("Failed creating health check. %s", err)
+		return err
 	}
-
-	if cleanup {
-		return ErrCantRemoveInstanceGroup
-	}
-
-	glog.Infof("Removing instance groups for [%s] completed successfully", groupName)
-
 	return nil
 }
 
-func (c *gceCloud) AddInstancesToInstanceGroup(instanceNames []string, groupName string) error {
-	glog.Infof("Adding %d instances into instance group [%s]", len(instanceNames), groupName)
+func (c *gceCloud) AddEndpointsToNetworkEndpointGroup(endpoints []gce.NetworkEndpoint, groupName string) error {
+	glog.Infof("Adding %d network endpoints into network endpoint group [%s]", len(endpoints), groupName)
 
-	// since instance names are globally unique, we just need to care about matching provided
-	// instance names to each zone.
-	// let's do it on a per-zone basis.
-	// remember instance names were zonified before added to instance group.
 	for _, zone := range c.zones {
-		// instance group name for this zone
-		finalGroupName := zonify(zone, groupName)
+		finalGroupName := util.Zonify(zone, groupName)
 
-		// get all instances in zone
-		zoneInstances, err := c.client.ListInstancesInZone(zone)
+		err := c.client.AttachNetworkEndpoints(finalGroupName, zone, endpoints)
+
 		if err != nil {
+			glog.Errorf("Failed adding endpoints to network endpoint group [%s]. %s", finalGroupName, err)
 			return err
 		}
+	}
 
-		// get all instances in group
-		groupInstances, err := c.client.ListInstancesInInstanceGroupForZone(finalGroupName, zone)
+	return nil
+}
+
+func (c *gceCloud) RemoveEndpointsFromNetworkEndpointGroup(endpoints []gce.NetworkEndpoint, groupName string) error {
+	glog.Infof("Removing %d network endpoints from network endpoint group [%s]", len(endpoints), groupName)
+
+	for _, zone := range c.zones {
+		finalGroupName := util.Zonify(zone, groupName)
+
+		err := c.client.DetachNetworkEndpoints(finalGroupName, zone, endpoints)
+
 		if err != nil {
+			glog.Errorf("Failed removing endpoints from network endpoint group [%s]. %s", finalGroupName, err)
 			return err
 		}
-
-		var instancesToAddtoZone []string
-
-		// for each instance, un-zonify its name so we can compare against provided instanceNames
-		for _, zoneInstance := range zoneInstances.Items {
-			// for each instanceName, if equals to unzonified name, add to group
-			for _, instanceName := range instanceNames {
-				if instanceName == zoneInstance.Name {
-					// is instance already added to instance group?
-					ignoreOp := false
-					for _, groupInstance := range groupInstances.Items {
-						// groupInstance.Instance is an instance URL, so replace is needed here
-						split := strings.Split(groupInstance.Instance, "/")
-						if split[len(split)-1] == zoneInstance.Name {
-							ignoreOp = true
-						}
-					}
-					if !ignoreOp {
-						// use real instance name, meaning the zonified
-						instancesToAddtoZone = append(instancesToAddtoZone, zoneInstance.Name)
-					}
-				}
-			}
-		}
-
-		// are there any instances to add for this zone?
-		total := len(instancesToAddtoZone)
-		if total > 0 {
-			glog.Infof("There are %d instances to add to instance group [%s] on zone [%s]. Adding..", total, groupName, zone)
-			if err := c.client.AddInstancesToInstanceGroup(finalGroupName, instancesToAddtoZone, zone); err != nil {
-				return err
-			}
-		} else {
-			glog.Infof("There are no instances to add to instance group [%s] on zone [%s].", groupName, zone)
-		}
 	}
-
-	glog.Infof("Added %d instances into instance group [%s]", len(instanceNames), groupName)
 
 	return nil
 }
 
-func (c *gceCloud) RemoveInstancesFromInstanceGroup(instanceNames []string, groupName string) error {
-	glog.Infof("Removing %d instances from instance group [%s]", len(instanceNames), groupName)
-
-	// since instance names are globally unique, we just need to care about matching provided
-	// instance names to each zone.
-	// let's do it on a per-zone basis.
-	// remember instance names were zonified before added to instance group.
+func (c *gceCloud) CreateBackendService(groupName string, affinity string, cdn bool) error {
 	for _, zone := range c.zones {
-		// instance group name for this zone
-		finalGroupName := zonify(zone, groupName)
-
-		// get all instances in group
-		groupInstances, err := c.client.ListInstancesInInstanceGroupForZone(finalGroupName, zone)
+		err := c.client.CreateBackendService(groupName, zone, affinity, cdn)
 		if err != nil {
+			glog.Errorf("Failed creating backend service. %s", err)
 			return err
 		}
-
-		var instancesToRemoveFromZone []string
-
-		// for each instance in group compare against provided instanceNames
-		for _, groupInstance := range groupInstances.Items {
-			// compare with provided instanceNames
-			for _, instanceName := range instanceNames {
-				// groupInstance.Instance is an instance URL, so replace is needed here
-				split := strings.Split(groupInstance.Instance, "/")
-				if instanceName == split[len(split)-1] {
-					// use real instance name, meaning the zonified
-					instancesToRemoveFromZone = append(instancesToRemoveFromZone, instanceName)
-				}
-			}
-		}
-
-		// are there any instances to be removed from this zone?
-		total := len(instancesToRemoveFromZone)
-		if total > 0 {
-			glog.Infof("There are %d instances to be removed from instance group [%s] on zone [%s]. Removing..", total, groupName, zone)
-			if err := c.client.RemoveInstancesFromInstanceGroup(finalGroupName, instancesToRemoveFromZone, zone); err != nil {
-				return err
-			}
-		} else {
-			glog.Infof("There are no instances to be removed from instance group [%s] on zone [%s].", groupName, zone)
-		}
 	}
-
 	return nil
 }
 
-func (c *gceCloud) SetPortForInstanceGroup(port int64, groupName string) error {
-	glog.Infof("Setting instance group [%s] port [%d]..", groupName, port)
+func (c *gceCloud) UpdateUrlMap(urlMapName, groupName string, host, path string) error {
+	glog.Infof("Updating url map [%s].", urlMapName)
 
-	success := true
 	for _, zone := range c.zones {
-		// instance group name for this zone
-		finalGroupName := zonify(zone, groupName)
-
-		// get all instances in group
-		if err := c.client.SetPortToInstanceGroupForZone(finalGroupName, port, zone); err != nil {
-			glog.Errorf("There was an error while setting port [%d] for instance group [%s] in zone [%s]. %s", port, finalGroupName, zone, err)
-			success = false
+		err := c.client.UpdateUrlMap(urlMapName, util.Zonify(zone, groupName), host, path)
+		if err != nil {
+			glog.Errorf("Failed updating url map [%s]. %s", urlMapName, err)
+			return err
 		}
 	}
 
-	if !success {
-		return ErrCantSetPortForInstanceGroup
-	}
+	glog.Infof("Updated url map [%s]", urlMapName)
 
 	return nil
-}
-
-func (c *gceCloud) CreateOrUpdateLoadBalancer(groupName string, port string) error {
-	glog.Infof("Creating/updating load-balancer for [%s:%s].", groupName, port)
-	err := c.client.CreateOrUpdateLoadBalancer(groupName, port, c.zones)
-	glog.Infof("Load-balancer [%s] created successfully.", groupName)
-	return err
-}
-
-func (c *gceCloud) RemoveLoadBalancer(groupName string) error {
-	glog.Infof("Removing load-balancer for [%s].", groupName)
-	err := c.client.RemoveLoadBalancer(groupName)
-	glog.Infof("Load-balancer [%s] removed successfully.", groupName)
-
-	return err
-}
-
-//zonify takes a specified name and prepends a specified zone plus an hyphen
-// e.g. zone == "us-east1-d" && name == "myname", returns "us-east1-d-myname"
-func zonify(zone string, name string) string {
-	return strings.Join([]string{zone, name}, "-")
-}
-
-// unzonify takes a specified supposedly zonified name and removes the zone prefix.
-// e.g. name == "us-east1-d-myname" && zone == "us-east1-d", returns "myname"
-func unzonify(name string, zone string) string {
-	return strings.TrimPrefix(name, zone)
 }

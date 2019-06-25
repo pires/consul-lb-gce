@@ -25,6 +25,7 @@ type ServiceUpdate struct {
 	ServiceName      string
 	UpdateType       string
 	ServiceInstances map[string]*ServiceInstance
+	Tag              string
 }
 
 // Config represents a registry's configuration
@@ -35,6 +36,6 @@ type Config struct {
 
 // Registry represents a registry for services
 type Registry interface {
-	// Run starts the registry returning a channel for registry cancelation
+	// Run starts the registry returning a channel for registry cancellation
 	Run(upstream chan<- *ServiceUpdate, done <-chan struct{})
 }

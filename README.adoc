@@ -13,33 +13,41 @@ toc::[]
 ## Pre-requisites
 
 * Go 1.5.x
+* `glide` package manager
 * `make`
-* Some Go tools
-** http://getgb.io[`gb`] - `go get -u github.com/constabulary/gb/...`
 * A running Nomad cluster with Consul integration on Google Compute Engine
+* Necessary DNS record sets
+* Firewall rules for necessary endpoints
+* Url map which is used to add new host, path rules and path matchers
+* Global forwarding rule
+* Target HTTP Proxy
+* Configured `gcloud` CLI (version should support `network endpoint groups` in beta, necessary project and user)
+
+
+## Installation
+1. `make install`
+2. `make release` to build Linux binary (or `make build` to binary without GOOS and GOARCH pre-configurations)
+3. Copy `config.toml.sample` as `config.toml` to directory with binary you built before and change it for your requirements
+4. `./consul-lb-google -logtostderr=1 -stderrthreshold=INFO` to run it with INFO logging level (just remove these options to have standard logging level)
 
 ## Development
 
+To install dependecies run `make install`.
+
 ### Build
 
-The following will take care of generating code, build and run tests.
-```
-make all
-```
+`make build`
 
 ### Test
 
-**Attention:** Testing locally is not supported, but if you're feeling adventurous, take a look at https://github.com/pires/nomad-vagrant-coreos-cluster[this Nomad cluster with Consul integration].
+`make test` for running unit tests.
 
-Now, before deploying the `nginx` service example, let's compile and run the load-balancer manager. On another terminal window, execute:
+### Running
+
+**Attention:** Testing locally is not fully supported, but if you're feeling adventurous, take a look at https://github.com/pires/nomad-vagrant-coreos-cluster[this Nomad cluster with Consul integration].
 
 ```
-gb build all
-cat config.toml.sample > config.toml
-
-(..edit config.toml accordingly..)
-
-GOOGLE_APPLICATION_CREDENTIALS=~/Work/gce/my-project-1234567890.json bin/consul-lb-google -config config.toml -alsologtostderr
+./consul-lb-google -logtostderr=1 -stderrthreshold=INFO
 ```
 
 You should see something like:
@@ -51,66 +59,30 @@ I1218 16:20:36.878198       1 main.go:69] Initiating registry..
 I1218 16:20:36.878214       1 main.go:76] Waiting for service updates..
 ```
 
-Deploy the `nginx` example:
+### How it works
 
-```
-nomad run web.hcl
-```
+The service is polling Consul on running services. For groups of services with watched tags it creates network endpoint group, health check, backend service and adds host and path rules (according to tag) to existing url map and navigates requests to created backend service. After created NEG is populated or depopulated with endpoints.
 
-Looking at the load-balancer manager terminal window, one should see something like:
-```
-I1218 16:21:07.931230       1 main.go:129] Initializing service [web]..
-I1218 16:21:07.931263       1 cloud.go:78] Creating instance groups for [web]..
-I1218 16:21:07.931269       1 cloud.go:81] Creating instance group [us-east1-d-web] in zone [us-east1-d].
-I1218 16:21:11.751202       1 cloud.go:81] Creating instance group [europe-west1-d-web] in zone [europe-west1-d].
-I1218 16:21:15.747546       1 cloud.go:81] Creating instance group [asia-east1-c-web] in zone [asia-east1-c].
-I1218 16:21:19.653728       1 cloud.go:101] Created instance groups for [web] successfully
-I1218 16:21:19.653771       1 main.go:135] Watching service [web].
-W1218 16:21:19.653780       1 main.go:195] Adding instance [client-us-01.c.my-project.internal].
-I1218 16:21:19.654187       1 main.go:203] Service has new port [11080]
-I1218 16:21:19.654217       1 cloud.go:133] Adding 1 instances into instance group [web]
-I1218 16:21:19.963843       1 cloud.go:182] There are 1 instances to add to instance group [web] on zone [us-east1-d]. Adding..
-I1218 16:21:20.764763       1 cloud.go:187] There are no instances to add to instance group [web] on zone [europe-west1-d].
-I1218 16:21:21.049794       1 cloud.go:187] There are no instances to add to instance group [web] on zone [asia-east1-c].
-I1218 16:21:21.049813       1 cloud.go:191] Added 1 instances into instance group [web]
-I1218 16:21:21.049820       1 cloud.go:244] Setting instance group [web] port [11080]..
-I1218 16:21:22.229671       1 cloud.go:266] Creating/updating load-balancer for [web:11080].
-I1218 16:21:53.131003       1 gce.go:546] Created/updated firewall rule with success.
-I1218 16:21:56.995704       1 gce.go:557] Created/updated HTTP health-check with success.
-I1218 16:22:02.429513       1 gce.go:568] Created/updated backend service with success.
-I1218 16:22:06.350711       1 gce.go:574] Created URL map with success.
-I1218 16:22:10.381194       1 gce.go:580] Created target HTTP proxy with success.
-I1218 16:22:17.401182       1 gce.go:587] Created global forwarding rule with success.
-I1218 16:22:17.401215       1 cloud.go:268] Load-balancer [web] created successfully.
-```
+_For example:_
 
-Validate that load-balancing is working alright.
+1. Watched tag is single and it is `tagprefix-cdn-ipaffinity-test.domain.com/`.
+2. App creates network endpoint group `neg-tagprefix-cdn-ipaffinity-test-domain-com` or use existing one.
+3. App creates health check 'http-hc-neg-tagprefix-cdn-ipaffinity-test-domain-com' or use existing one.
+4. App creates backend service with NEG and HC created above, also with cdn and affinity configurations if they are specified.
+5. App adds (if not exist) host rule for `test.domain.com` with patch matcher for `/*` targeted to created backend service.
+* If path has not only `/` (e.g.: `/path`) then it creates `/test*` path matcher and targets it to created backend, but `/*` is navigated to default backend service in url map.
 
-Now, stop it:
 
-```
-nomad stop web
-```
+### Tag format
 
-Looking again at the load-balancer manager terminal window, one should see something like:
+Tag has following format `${TAG_PREFIX}${CDN}-${AFFINITY}-${HOST}${PATH}`, e.g.: _tagprefix-cdn-ipaffinity-test.domain.com/_.
 
-```
-I1218 16:26:17.601174       1 cloud.go:273] Removing load-balancer for [web].
-I1218 16:26:24.390783       1 gce.go:598] Removed global forwarding rule with success.
-I1218 16:26:28.139698       1 gce.go:604] Removed target HTTP proxy with success.
-I1218 16:26:32.001725       1 gce.go:610] Removed URL map with success.
-I1218 16:26:35.774544       1 gce.go:616] Removed backend service with success.
-I1218 16:26:39.477543       1 gce.go:622] Removed HTTP health-check with success.
-I1218 16:27:07.202854       1 gce.go:628] Removed firewall rule with success.
-I1218 16:27:07.202878       1 cloud.go:275] Load-balancer [web] removed successfully.
-I1218 16:27:07.202886       1 cloud.go:109] Removing instance groups for [web]..
-W1218 16:27:10.853607       1 cloud.go:115] Removed instance group [us-east1-d-web] from zone [us-east1-d].
-W1218 16:27:14.319410       1 cloud.go:115] Removed instance group [europe-west1-d-web] from zone [europe-west1-d].
-W1218 16:27:18.036865       1 cloud.go:115] Removed instance group [asia-east1-c-web] from zone [asia-east1-c].
-I1218 16:27:18.036888       1 cloud.go:127] Removing instance groups for [web] completed successfully
-I1218 16:27:18.036896       1 main.go:149] Stopped watching service [web].
-```
+`CDN` can have values: `'nocdn'` or `'cdn'`.
 
-### Scaling
+`AFFINITY` can have values: `'ipaffinity'` or `'noaffinity'`.
 
-The manager supports scaling the number of instances of a service as well.
+### Configuration
+
+You can look at example of configuration in `config.toml.sample`.
+
+Note: There are health checks paths must be specified since they can't be retrieved from Consul.

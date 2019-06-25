@@ -2,6 +2,7 @@ package consul
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"sync"
 	"time"
@@ -37,6 +38,7 @@ type consulService struct {
 	removed   bool
 	running   bool
 	done      chan struct{}
+	tag       string
 }
 
 // NewRegistry returns a Consul-backed service registry
@@ -85,6 +87,7 @@ func (cr *consulRegistry) Run(upstream chan<- *registry.ServiceUpdate, done <-ch
 				upstream <- &registry.ServiceUpdate{
 					ServiceName: srv.Name,
 					UpdateType:  registry.DELETED,
+					Tag:         srv.tag,
 				}
 				break
 			}
@@ -96,6 +99,7 @@ func (cr *consulRegistry) Run(upstream chan<- *registry.ServiceUpdate, done <-ch
 				upstream <- &registry.ServiceUpdate{
 					ServiceName: srv.Name,
 					UpdateType:  registry.NEW,
+					Tag:         srv.tag,
 				}
 			}
 		}
@@ -149,12 +153,16 @@ func (cr *consulRegistry) watchServices(update chan<- *consulService, done <-cha
 		for k, v := range services {
 			// ignore all but the ones with specified tags
 			ignore := true
+
+			var properTag string
+
 			// iterate service tags
-			for tag := range v {
+			for _, tag := range v {
 				// iterate possible tags and compare
-				for tagToWatch := range cr.tagsToWatch {
+				for _, tagToWatch := range cr.tagsToWatch {
 					if tag == tagToWatch {
 						ignore = false
+						properTag = tag
 						// TODO add tag to watchedService
 					}
 				}
@@ -170,6 +178,7 @@ func (cr *consulRegistry) watchServices(update chan<- *consulService, done <-cha
 				service = new(consulService)
 				service.Name = k
 				service.done = make(chan struct{})
+				service.tag = properTag
 				cr.watchedServices[k] = service
 				// since src.running == false, registry will start watching this service
 				// before sending updates upstream
@@ -212,12 +221,11 @@ func (cr *consulRegistry) watchService(service *consulService, upstream chan<- *
 		service.Instances = make(map[string]*registry.ServiceInstance, len(nodes))
 
 		for _, node := range nodes {
-			service.Instances[node.Node] = &registry.ServiceInstance{
+			service.Instances[fmt.Sprintf("%s:%d", node.ServiceAddress, node.ServicePort)] = &registry.ServiceInstance{
 				Host:    node.Node,
 				Address: node.Address,
 				Tags:    node.ServiceTags,
 				Port:    strconv.Itoa(node.ServicePort),
-				// ServiceId:   node.ServiceID,
 			}
 		}
 
@@ -235,6 +243,7 @@ func (cr *consulRegistry) watchService(service *consulService, upstream chan<- *
 			ServiceName:      service.Name,
 			UpdateType:       registry.CHANGED,
 			ServiceInstances: service.Instances,
+			Tag:              service.tag,
 		}
 		cr.Unlock()
 	}

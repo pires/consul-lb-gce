@@ -1,0 +1,70 @@
+hash: 098c00c165dc18ab6da9e9472ae887940a7392e01548a5ea8a622e8822c9e0a7
+updated: 2019-06-18T15:40:37.304334+03:00
+imports:
+- name: github.com/BurntSushi/toml
+  version: 056c9bc7be7190eaa7715723883caffa5f8fa3e4
+  repo: https://github.com/BurntSushi/toml
+- name: github.com/golang/glog
+  version: fca8c8854093a154ff1eb580aae10276ad6b1b5f
+  repo: https://github.com/golang/glog
+- name: github.com/golang/protobuf
+  version: aa810b61a9c79d51363740d207bb46cf8e620ed5
+  subpackages:
+  - proto
+- name: github.com/hashicorp/consul
+  version: 94f33972bdc1574738b00290b5b9ae1df445435e
+  repo: https://github.com/hashicorp/consul
+  subpackages:
+  - api
+- name: github.com/hashicorp/go-cleanhttp
+  version: 5df5ddc69534f1a4697289f1dca2193fbb40213f
+- name: github.com/hashicorp/serf
+  version: e9ac4bb0c5721826d5cd3d1cd582c12fbc664bb8
+  subpackages:
+  - coordinate
+- name: golang.org/x/net
+  version: d75b1902409c457a51e4bd1895031872c370983a
+  repo: https://go.googlesource.com/net
+  subpackages:
+  - context
+  - context/ctxhttp
+- name: golang.org/x/oauth2
+  version: 2baa8a1b9338cf13d9eeb27696d761155fa480be
+  repo: https://go.googlesource.com/oauth2
+  subpackages:
+  - google
+  - internal
+  - jws
+  - jwt
+- name: google.golang.org/api
+  version: 80b32e23dd3e75da09373e0566232a3fe91ec43e
+  subpackages:
+  - compute/v1
+  - gensupport
+  - googleapi
+  - googleapi/internal/uritemplates
+- name: google.golang.org/appengine
+  version: b2f4a3cf3c67576a2ee09e1fe62656a5086ce880
+  subpackages:
+  - internal
+  - internal/app_identity
+  - internal/base
+  - internal/datastore
+  - internal/log
+  - internal/modules
+  - internal/remote_api
+  - internal/urlfetch
+  - urlfetch
+- name: google.golang.org/cloud
+  version: ba8512ba2fa64d5a130fc8cd9a0d4e641e92e734
+  subpackages:
+  - compute/metadata
+  - internal
+- name: k8s.io/apimachinery
+  version: 6a5db36e93ad748d0bd973480dfd58d80dd8d94b
+  subpackages:
+  - pkg/util/runtime
+  - pkg/util/wait
+- name: k8s.io/klog
+  version: 89e63fd5117f8c20208186ef85f096703a280c20
+testImports: []
