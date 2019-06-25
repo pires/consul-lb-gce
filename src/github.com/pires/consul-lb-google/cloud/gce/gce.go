@@ -239,7 +239,14 @@ func (gce *GCEClient) UpdateUrlMap(urlMapName, name, host, path string) error {
 	// create path matcher if it doesn't exist
 	var existingHostRule *compute.HostRule
 	for _, hr := range urlMap.HostRules {
-		if hr.Description == host {
+		theSameHost := false
+		for _, h := range hr.Hosts {
+			if h == host {
+				theSameHost = true
+				break
+			}
+		}
+		if theSameHost {
 			existingHostRule = hr
 			break
 		}
