@@ -4,6 +4,7 @@ import (
 	"github.com/golang/glog"
 	"github.com/pires/consul-lb-google/cloud/gce"
 	"github.com/pires/consul-lb-google/util"
+	"sync"
 )
 
 type Cloud interface {
@@ -28,6 +29,8 @@ type Cloud interface {
 type gceCloud struct {
 	client *gce.GCEClient
 
+	lock *sync.RWMutex
+
 	// zones available to this project
 	zones []string
 }
@@ -40,6 +43,7 @@ func New(projectID string, network string, allowedZones []string) (Cloud, error)
 
 	return &gceCloud{
 		client: c,
+		lock:   &sync.RWMutex{},
 		zones:  allowedZones,
 	}, nil
 }
@@ -112,6 +116,9 @@ func (c *gceCloud) CreateBackendService(groupName string, affinity string, cdn b
 }
 
 func (c *gceCloud) UpdateUrlMap(urlMapName, groupName string, host, path string) error {
+	defer c.lock.Unlock()
+	c.lock.Lock()
+
 	glog.Infof("Updating url map [%s].", urlMapName)
 
 	for _, zone := range c.zones {
