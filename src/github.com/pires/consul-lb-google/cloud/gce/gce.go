@@ -212,39 +212,46 @@ func (gce *GCEClient) UpdateUrlMap(urlMapName, name, host, path string) error {
 	pathMatcherName := strings.Split(host, ".")[0]
 
 	// create path matcher if it doesn't exist
-	var existingPathMatcher *compute.PathMatcher
-	for _, pm := range urlMap.PathMatchers {
-		if pm.Name == pathMatcherName {
-			existingPathMatcher = pm
-			break
-		}
-	}
-	if existingPathMatcher == nil {
-		var defaultServiceLink string
-		if path == "/" {
-			defaultServiceLink = backend.SelfLink
-		} else {
-			defaultServiceLink = urlMap.DefaultService
-		}
-
-		urlMap.PathMatchers = append(urlMap.PathMatchers, &compute.PathMatcher{
-			Name:           pathMatcherName,
-			DefaultService: defaultServiceLink,
-			PathRules: []*compute.PathRule{
-				GetPathRule(path, backend.SelfLink),
-			},
-		})
-	}
-
-	// create path matcher if it doesn't exist
 	var existingHostRule *compute.HostRule
 	for _, hr := range urlMap.HostRules {
-		if hr.Description == host {
+		theSameHost := false
+		for _, h := range hr.Hosts {
+			if h == host {
+				theSameHost = true
+				break
+			}
+		}
+		if theSameHost {
 			existingHostRule = hr
 			break
 		}
 	}
 	if existingHostRule == nil {
+		// create path matcher if it doesn't exist
+		var existingPathMatcher *compute.PathMatcher
+		for _, pm := range urlMap.PathMatchers {
+			if pm.Name == pathMatcherName {
+				existingPathMatcher = pm
+				break
+			}
+		}
+		if existingPathMatcher == nil {
+			var defaultServiceLink string
+			if path == "/" {
+				defaultServiceLink = backend.SelfLink
+			} else {
+				defaultServiceLink = urlMap.DefaultService
+			}
+
+			urlMap.PathMatchers = append(urlMap.PathMatchers, &compute.PathMatcher{
+				Name:           pathMatcherName,
+				DefaultService: defaultServiceLink,
+				PathRules: []*compute.PathRule{
+					GetPathRule(path, backend.SelfLink),
+				},
+			})
+		}
+
 		urlMap.HostRules = append(urlMap.HostRules, &compute.HostRule{
 			Hosts:       []string{host},
 			PathMatcher: pathMatcherName,
@@ -252,7 +259,7 @@ func (gce *GCEClient) UpdateUrlMap(urlMapName, name, host, path string) error {
 		})
 	}
 
-	if existingPathMatcher == nil || existingHostRule == nil {
+	if existingHostRule == nil {
 		op, err := gce.service.UrlMaps.Update(gce.projectID, urlMap.Name, urlMap).Do()
 
 		if err != nil {
