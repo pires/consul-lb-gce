@@ -10,7 +10,7 @@ A smart Google Cloud Engine load-balancer manager for https://www.consul.io/[Con
 
 # Why this project is stopped?
 
-[https://groups.google.com/forum/?hl=EN#!searchin/gce-discussion/network$20endpoint$20group%7Csort:date/gce-discussion/jTP1D77VftY/kZgtNUjcBQAJ](Answer is here)
+Answer is here --> https://groups.google.com/forum/?hl=EN#!searchin/gce-discussion/network$20endpoint$20group%7Csort:date/gce-discussion/jTP1D77VftY/kZgtNUjcBQAJ
 
 toc::[]
 
