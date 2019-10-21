@@ -8,6 +8,10 @@
 
 A smart Google Cloud Engine load-balancer manager for https://www.consul.io/[Consul] backed services.
 
+# Why this project is stopped?
+
+[Answer is here](https://groups.google.com/forum/?hl=EN#!searchin/gce-discussion/network$20endpoint$20group%7Csort:date/gce-discussion/jTP1D77VftY/kZgtNUjcBQAJ)
+
 toc::[]
 
 ## Pre-requisites
