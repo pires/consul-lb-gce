@@ -1,12 +1,12 @@
 .PHONY: up
 ## up: runs application
 up:
-	@go run $$(ls | grep -v _test.go | grep .go)
+	@go run $$(ls | grep -v _test.go | grep .go) --stderrthreshold INFO
 
 .PHONY: release
 ## release: builds application for linux
 release:
-	@GOOS=linux GOARCH=amd64 go build
+	@GOOS=linux GOARCH=amd64 go build -o lb
 
 .PHONY: fmt
 ## fmt: formats source code

@@ -2,7 +2,6 @@ package gce
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/golang/glog"
@@ -14,18 +13,7 @@ import (
 const (
 	operationPollInterval        = 3 * time.Second
 	operationPollTimeoutDuration = 30 * time.Minute
-
-	maxResourceNameLength = 63
 )
-
-// NOTE: Maximum length of resource name is 63 and name must start and end with letter or digit
-func makeName(prefix string, name string) string {
-	n := strings.Join([]string{prefix, name}, "-")
-	if len(n) > maxResourceNameLength {
-		n = strings.TrimLeft(n[:maxResourceNameLength], "-")
-	}
-	return n
-}
 
 func waitForOp(op *compute.Operation, getOperation func(operationName string) (*compute.Operation, error)) error {
 	if op == nil {

@@ -7,9 +7,7 @@ import (
 )
 
 // CreateHTTPHealthCheck creates http health check.
-func (gce *Client) CreateHTTPHealthCheck(name string, path string) error {
-	hcName := makeHTTPHealthCheckName(name)
-
+func (gce *Client) CreateHTTPHealthCheck(hcName string, path string) error {
 	if path == "" {
 		path = "/"
 	}
@@ -29,8 +27,4 @@ func (gce *Client) CreateHTTPHealthCheck(name string, path string) error {
 	}
 
 	return nil
-}
-
-func makeHTTPHealthCheckName(name string) string {
-	return makeName("http-hc", name)
 }

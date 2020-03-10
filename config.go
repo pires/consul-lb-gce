@@ -14,14 +14,14 @@ type consulConfiguration struct {
 }
 
 type cloudConfiguration struct {
-	Project      string
-	Network      string
-	AllowedZones []string `toml:"allowed_zones"`
-	URLMap       string   `toml:"url_map"`
+	Project string
+	Network string
+	Zone    string
+	URLMap  string `toml:"url_map"`
 }
 
 type configuration struct {
-	TagParser tagParserConfiguration
+	TagParser tagParserConfiguration `toml:"tag_parser"`
 	Consul    consulConfiguration
 	Cloud     cloudConfiguration
 }

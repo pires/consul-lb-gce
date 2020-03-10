@@ -9,7 +9,6 @@ import (
 
 // UpdateURLMap updates an url map, using the given backend service as the default service.
 func (gce *Client) UpdateURLMap(urlMapName, backendServiceName, host, path string) error {
-
 	urlMap, err := gce.service.UrlMaps.Get(gce.projectID, urlMapName).Do()
 
 	if err != nil {

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 type tagInfo struct {
@@ -50,4 +51,15 @@ func newTagParser(prefix string) *tagParser {
 			),
 		),
 	}
+}
+
+func (info *tagInfo) String() string {
+	var cdn string
+	if info.CDN {
+		cdn = "cdn"
+	} else {
+		cdn = "nocdn"
+	}
+	normalizedHost := strings.Replace(info.Host, ".", "-", -1)
+	return fmt.Sprintf("%s-%s-%s", cdn, info.Affinity, normalizedHost)
 }

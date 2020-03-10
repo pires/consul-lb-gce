@@ -4,7 +4,6 @@ import (
 	"errors"
 	"io/ioutil"
 	"net/http"
-	"strings"
 )
 
 func SendHTTPRequest(c *http.Client, req *http.Request, successCodes []int) (*http.Response, error) {
@@ -30,16 +29,4 @@ func SendHTTPRequest(c *http.Client, req *http.Request, successCodes []int) (*ht
 	}
 
 	return response, nil
-}
-
-func Zonify(zone, name string) string {
-	return strings.Join([]string{zone, name}, "-")
-}
-
-func Unzonify(name string, zone string) string {
-	return strings.TrimPrefix(name, zone+"-")
-}
-
-func NormalizeInstanceName(name string) string {
-	return strings.Split(name, ".")[0]
 }

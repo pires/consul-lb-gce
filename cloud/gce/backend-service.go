@@ -13,22 +13,18 @@ const (
 )
 
 // GetBackendService retrieves a backend by name.
-func (gce *Client) GetBackendService(name string) (*compute.BackendService, error) {
-	bsName := makeBackendServiceName(name)
+func (gce *Client) GetBackendService(bsName string) (*compute.BackendService, error) {
 	return gce.service.BackendServices.Get(gce.projectID, bsName).Do()
 }
 
 // CreateBackendService creates backend service in specified zone based on NEG.
-func (gce *Client) CreateBackendService(groupName, zone, affinity string, cdn bool) error {
-	zonifiedGroupName := util.Zonify(zone, groupName)
-	bsName := makeBackendServiceName(zonifiedGroupName)
-	hcName := makeHTTPHealthCheckName(groupName)
+func (gce *Client) CreateBackendService(bsName, negName, hcName, zone, affinity string, cdn bool) error {
 	request, err := http.NewRequest(
 		"POST",
 		gce.makeCreateBackendServiceURL(),
 		gce.makeCreateBackendServiceBody(
 			bsName,
-			zonifiedGroupName,
+			negName,
 			hcName,
 			zone,
 			cdn,
@@ -52,8 +48,4 @@ func getAffinityOption(affinity string) string {
 	default:
 		return gceAffinityTypeNone
 	}
-}
-
-func makeBackendServiceName(name string) string {
-	return makeName("backend", name)
 }

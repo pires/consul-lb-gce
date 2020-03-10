@@ -2,20 +2,22 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"os"
 	"os/signal"
 	"strings"
 	"sync"
 
 	"github.com/dffrntmedia/consul-lb-gce/cloud/gce"
-	"github.com/dffrntmedia/consul-lb-gce/util"
 
 	"github.com/BurntSushi/toml"
 	"github.com/dffrntmedia/consul-lb-gce/cloud"
 	"github.com/dffrntmedia/consul-lb-gce/registry"
 	"github.com/dffrntmedia/consul-lb-gce/registry/consul"
 	"github.com/golang/glog"
+)
+
+const (
+	maximumNameLength = 63
 )
 
 func main() {
@@ -35,12 +37,12 @@ func main() {
 	tagParser := newTagParser(c.TagParser.TagPrefix)
 
 	glog.Infof(
-		"Initializing cloud client with project ID: %s, network: %s, allowed zones: [%v] ...",
+		"Initializing cloud client with project ID: %s, network: %s, zone: %s ...",
 		c.Cloud.Project,
 		c.Cloud.Network,
-		strings.Join(c.Cloud.AllowedZones, ", "),
+		c.Cloud.Zone,
 	)
-	client, err := cloud.New(c.Cloud.Project, c.Cloud.Network, c.Cloud.AllowedZones)
+	client, err := cloud.New(c.Cloud.Project, c.Cloud.Network, c.Cloud.Zone)
 	if err != nil {
 		glog.Fatal(err)
 	}
@@ -72,6 +74,35 @@ func main() {
 	glog.Info("Terminated")
 }
 
+// Handles updates for all services and dispatch them between specific per service handlers.
+func handleServices(c *configuration, cloud cloud.Cloud, tagParser *tagParser, updates <-chan *registry.ServiceUpdate, done chan struct{}) {
+	var wg sync.WaitGroup
+	handlers := make(map[string]chan *registry.ServiceUpdate)
+
+	for {
+		select {
+		case update := <-updates:
+			glog.Infof("%s is updated", update.ServiceName)
+			// is there a handler for updated service?
+			if handler, ok := handlers[update.ServiceName]; !ok {
+				// no handler
+				handler = make(chan *registry.ServiceUpdate)
+				handlers[update.ServiceName] = handler
+				// start handler in its own goroutine
+				wg.Add(1)
+				glog.Infof("Starting handler for %s", update.ServiceName)
+				go handleService(c, cloud, tagParser, update.Tag, handler, &wg, done)
+			}
+			// send update to handler
+			handlers[update.ServiceName] <- update
+		case <-done:
+			// wait for all handlers to terminate
+			wg.Wait()
+			return
+		}
+	}
+}
+
 // handleService handles service updates in a consistent way.
 // It will run until service is deleted or done is closed.
 func handleService(
@@ -89,7 +120,7 @@ func handleService(
 		return
 	}
 
-	networkEndpointGroupName := getNetworkEndpointGroupName(tagInfo)
+	serviceGroupName := tagInfo.String()
 
 	lock := &sync.RWMutex{}
 	isRunning := false
@@ -106,7 +137,7 @@ func handleService(
 
 					// NOTE: Create necessary DNS record sets yourself.
 
-					if err := client.CreateNetworkEndpointGroup(networkEndpointGroupName); err != nil {
+					if err := client.CreateNetworkEndpointGroup(makeName("neg", serviceGroupName)); err != nil {
 						lock.Unlock()
 						continue
 					}
@@ -116,17 +147,28 @@ func handleService(
 						glog.Error(err)
 						continue
 					}
-					if err := client.AddHealthCheck(networkEndpointGroupName, hcPath); err != nil {
+					if err := client.CreateHealthCheck(makeName("hc", serviceGroupName), hcPath); err != nil {
 						lock.Unlock()
 						continue
 					}
 
-					if err = client.CreateBackendService(networkEndpointGroupName, tagInfo.Affinity, tagInfo.CDN); err != nil {
+					if err = client.CreateBackendService(
+						makeName("bs", serviceGroupName),
+						makeName("neg", serviceGroupName),
+						makeName("hc", serviceGroupName),
+						tagInfo.Affinity,
+						tagInfo.CDN,
+					); err != nil {
 						lock.Unlock()
 						continue
 					}
 
-					if err := client.UpdateURLMap(c.Cloud.URLMap, networkEndpointGroupName, tagInfo.Host, tagInfo.Path); err != nil {
+					if err := client.UpdateURLMap(
+						c.Cloud.URLMap,
+						makeName("neg", serviceGroupName),
+						tagInfo.Host,
+						tagInfo.Path,
+					); err != nil {
 						lock.Unlock()
 						continue
 					}
@@ -142,7 +184,7 @@ func handleService(
 
 					for k, instance := range instances {
 						toRemove = append(toRemove, gce.NetworkEndpoint{
-							Instance: util.NormalizeInstanceName(instance.Host),
+							Instance: normalizeInstanceName(instance.Host),
 							IP:       instance.Address,
 							Port:     instance.Port,
 						})
@@ -151,8 +193,8 @@ func handleService(
 
 					//do we have instances to remove from the NEG?
 					if len(toRemove) > 0 {
-						if err := client.RemoveEndpointsFromNetworkEndpointGroup(toRemove, networkEndpointGroupName); err != nil {
-							glog.Errorf("Failed removing instances from network endpoint group [%s]. %s", networkEndpointGroupName, err)
+						if err := client.DetachEndpointsFromGroup(toRemove, makeName("neg", serviceGroupName)); err != nil {
+							glog.Errorf("Failed removing instances from network endpoint group [%s]. %s", makeName("neg", serviceGroupName), err)
 						}
 					}
 
@@ -176,7 +218,7 @@ func handleService(
 					// Doesn't instance exist in update?
 					if _, ok := update.ServiceInstances[k]; !ok {
 						toRemove = append(toRemove, gce.NetworkEndpoint{
-							Instance: util.NormalizeInstanceName(instance.Host),
+							Instance: normalizeInstanceName(instance.Host),
 							IP:       instance.Address,
 							Port:     instance.Port,
 						})
@@ -189,7 +231,7 @@ func handleService(
 					// Doesn't instance exist in running instances?
 					if _, ok := instances[k]; !ok {
 						toAdd = append(toAdd, gce.NetworkEndpoint{
-							Instance: util.NormalizeInstanceName(instance.Host),
+							Instance: normalizeInstanceName(instance.Host),
 							IP:       instance.Address,
 							Port:     instance.Port,
 						})
@@ -199,15 +241,15 @@ func handleService(
 
 				//do we have instances to remove from the NEG?
 				if len(toRemove) > 0 {
-					if err := client.RemoveEndpointsFromNetworkEndpointGroup(toRemove, networkEndpointGroupName); err != nil {
-						glog.Errorf("Failed removing instances from network endpoint group [%s]. %s", networkEndpointGroupName, err)
+					if err := client.DetachEndpointsFromGroup(toRemove, makeName("neg", serviceGroupName)); err != nil {
+						glog.Errorf("Failed removing instances from network endpoint group [%s]. %s", makeName("neg", serviceGroupName), err)
 					}
 				}
 
 				// do we have new instances to add to the NEG?
 				if len(toAdd) > 0 {
-					if err := client.AddEndpointsToNetworkEndpointGroup(toAdd, networkEndpointGroupName); err != nil {
-						glog.Errorf("Failed adding instances to network endpoint group [%s]. %s", networkEndpointGroupName, err)
+					if err := client.AttachEndpointsToGroup(toAdd, makeName("neg", serviceGroupName)); err != nil {
+						glog.Errorf("Failed adding instances to network endpoint group [%s]. %s", makeName("neg", serviceGroupName), err)
 					}
 				}
 
@@ -223,40 +265,12 @@ func handleService(
 	}
 }
 
-// Handles updates for all services and dispatch them between specific per service handlers.
-func handleServices(c *configuration, cloud cloud.Cloud, tagParser *tagParser, updates <-chan *registry.ServiceUpdate, done chan struct{}) {
-	var wg sync.WaitGroup
-	handlers := make(map[string]chan *registry.ServiceUpdate)
-
-	for {
-		select {
-		case update := <-updates:
-			// is there a handler for updated service?
-			if handler, ok := handlers[update.ServiceName]; !ok {
-				// no so provision handler
-				handler = make(chan *registry.ServiceUpdate)
-				handlers[update.ServiceName] = handler
-				// start handler in its own goroutine
-				wg.Add(1)
-				go handleService(c, cloud, tagParser, update.Tag, handler, &wg, done)
-			}
-			// send update to handler
-			handlers[update.ServiceName] <- update
-		case <-done:
-			// wait for all handlers to terminate
-			wg.Wait()
-			return
-		}
-	}
+// NOTE: Maximum length of resource name is 63 and name must start and end with letter or digit
+func makeName(prefix string, name string) string {
+	n := strings.Join([]string{prefix, name}, "-")
+	return strings.TrimLeft(n[:maximumNameLength], "-")
 }
 
-func getNetworkEndpointGroupName(tagInfo *tagInfo) string {
-	var cdn string
-	if tagInfo.CDN {
-		cdn = "cdn"
-	} else {
-		cdn = "nocdn"
-	}
-	normalizedHost := strings.Replace(tagInfo.Host, ".", "-", -1)
-	return fmt.Sprintf("neg-%s-%s-%s", cdn, tagInfo.Affinity, normalizedHost)
+func normalizeInstanceName(name string) string {
+	return strings.Split(name, ".")[0]
 }

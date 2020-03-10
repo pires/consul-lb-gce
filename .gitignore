@@ -19,7 +19,9 @@ pkg
 *.toml
 *.json
 
-src/github.com/dffrntmedia/consul-lb-gce/consul-lb-google
-src/github.com/dffrntmedia/consul-lb-gce/vendor/**
+## binaries
+consul-lb-gce
+lb
 
+## MacOS
 **/.DS_Store
