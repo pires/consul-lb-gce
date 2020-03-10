@@ -1,10 +1,11 @@
 package cloud
 
 import (
-	"github.com/golang/glog"
-	"github.com/pires/consul-lb-google/cloud/gce"
-	"github.com/pires/consul-lb-google/util"
 	"sync"
+
+	"github.com/dffrntmedia/consul-lb-gce/cloud/gce"
+	"github.com/dffrntmedia/consul-lb-gce/util"
+	"github.com/golang/glog"
 )
 
 type Cloud interface {

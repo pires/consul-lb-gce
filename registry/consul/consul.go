@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pires/consul-lb-google/registry"
+	"github.com/dffrntmedia/consul-lb-gce/registry"
 
 	"github.com/golang/glog"
 	consul "github.com/hashicorp/consul/api"

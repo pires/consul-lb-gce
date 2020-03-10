@@ -3,7 +3,7 @@ package gce
 import (
 	"bytes"
 	"fmt"
-	"github.com/pires/consul-lb-google/util"
+	"github.com/dffrntmedia/consul-lb-gce/util"
 	"google.golang.org/api/dns/v1"
 	"net/http"
 	"strings"
@@ -307,7 +307,6 @@ func (gce *GCEClient) makeAttachOrDetachNetworkEndpointsBody(endpoints []Network
 	}
 	return bytes.NewBuffer([]byte(fmt.Sprintf("{ \"networkEndpoints\": [%s] }", strings.Join(endpointsJsons, ","))))
 }
-
 
 func (gce *GCEClient) makeCreateNetworkEndpointGroupUrl(zone string) string {
 	return fmt.Sprintf("https://www.googleapis.com/compute/v1/projects/%s/zones/%s/networkEndpointGroups", gce.projectID, zone)

@@ -3,99 +3,64 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/pires/consul-lb-google/cloud/gce"
-	"github.com/pires/consul-lb-google/util"
 	"os"
 	"os/signal"
 	"strings"
 	"sync"
 
+	"github.com/dffrntmedia/consul-lb-gce/cloud/gce"
+	"github.com/dffrntmedia/consul-lb-gce/util"
+
 	"github.com/BurntSushi/toml"
+	"github.com/dffrntmedia/consul-lb-gce/cloud"
+	"github.com/dffrntmedia/consul-lb-gce/registry"
+	"github.com/dffrntmedia/consul-lb-gce/registry/consul"
 	"github.com/golang/glog"
-	"github.com/pires/consul-lb-google/cloud"
-	"github.com/pires/consul-lb-google/registry"
-	"github.com/pires/consul-lb-google/registry/consul"
-	"github.com/pires/consul-lb-google/tagparser"
 )
-
-var (
-	config = flag.String("config", "config.toml", "Path to the configuration file")
-
-	cfg configuration
-
-	client cloud.Cloud
-
-	tagParser tagparser.TagParser
-
-	err error
-)
-
-type tagParserConfiguration struct {
-	TagPrefix string `toml:"tag_prefix"`
-}
-
-type consulConfiguration struct {
-	Url         string
-	TagsToWatch []string `toml:"tags_to_watch"`
-	// NOTE: Since we can't retrieve health checks definitions from Consul we must explicitly define them in configuration
-	HealthChecksPaths map[string]string `toml:"health_checks_paths"`
-}
-
-type cloudConfiguration struct {
-	Project      string
-	Network      string
-	AllowedZones []string `toml:"allowed_zones"`
-	UrlMap       string   `toml:"url_map"`
-}
-
-type configuration struct {
-	TagParser tagParserConfiguration
-	Consul    consulConfiguration
-	Cloud     cloudConfiguration
-}
 
 func main() {
+	var configurationPath string
+	flag.StringVar(&configurationPath, "config", "config.toml", "Configuration path")
 	flag.Parse()
-
-	glog.Info("Starting..")
-
-	// read configuration
-	if _, err := toml.DecodeFile(*config, &cfg); err != nil {
-		panic(err)
+	if configurationPath == "" {
+		glog.Fatal("Configuration path is required")
 	}
 
-	tagParser = tagparser.New(cfg.TagParser.TagPrefix)
+	glog.Infof("Reading configuration from %s", configurationPath)
+	var c configuration
+	if _, err := toml.DecodeFile(configurationPath, &c); err != nil {
+		glog.Fatal(err)
+	}
 
-	// provision cloud client
-	glog.Infof("Initializing cloud client [Project ID: %s, Network: %s, Allowed Zones: %#v]..", cfg.Cloud.Project, cfg.Cloud.Network, cfg.Cloud.AllowedZones)
-	client, err = cloud.New(cfg.Cloud.Project, cfg.Cloud.Network, cfg.Cloud.AllowedZones)
+	tagParser := newTagParser(c.TagParser.TagPrefix)
+
+	glog.Infof("Initializing cloud client [Project ID: %s, Network: %s, Allowed Zones: %v]", c.Cloud.Project, c.Cloud.Network, c.Cloud.AllowedZones)
+	client, err := cloud.New(c.Cloud.Project, c.Cloud.Network, c.Cloud.AllowedZones)
 	if err != nil {
-		panic(err)
+		glog.Fatal(err)
 	}
 
-	// connect to Consul
-	glog.Infof("Connecting to Consul at %s..", cfg.Consul.Url)
+	glog.Infof("Connecting to Consul at %s", c.Consul.URL)
 	r, err := consul.NewRegistry(&registry.Config{
-		Addresses:   []string{cfg.Consul.Url},
-		TagsToWatch: cfg.Consul.TagsToWatch,
+		Addresses:   []string{c.Consul.URL},
+		TagsToWatch: c.Consul.TagsToWatch,
 	})
 	if err != nil {
-		panic(err)
+		glog.Fatal(err)
 	}
 
-	glog.Info("Initiating registry..")
 	updates := make(chan *registry.ServiceUpdate)
 	done := make(chan struct{})
-	// register for service updates
-	go r.Run(updates, done)
 
-	glog.Info("Waiting for service updates..")
-	go handleServices(updates, done)
+	glog.Info("Listening for service updates...")
+	go r.Run(updates, done)
+	// service updates handler
+	go handleServices(&c, client, tagParser, updates, done)
 
 	// wait for Ctrl-c to stop server
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, os.Kill)
-	<-c
+	osSignalChannel := make(chan os.Signal, 1)
+	signal.Notify(osSignalChannel, os.Interrupt, os.Kill)
+	<-osSignalChannel
 
 	glog.Info("Terminating all pending jobs..")
 	close(done)
@@ -104,11 +69,11 @@ func main() {
 
 // handleService handles service updates in a consistent way.
 // It will run until service is deleted or done is closed.
-func handleService(tag string, updates <-chan *registry.ServiceUpdate, wg sync.WaitGroup, done chan struct{}) {
+func handleService(c *configuration, client cloud.Cloud, tagParser *TagParser, tag string, updates <-chan *registry.ServiceUpdate, wg sync.WaitGroup, done chan struct{}) {
 	tagInfo, err := tagParser.Parse(tag)
-
 	if err != nil {
 		glog.Errorf("Failed parsing tag [%s]. %s", tag, err)
+		return
 	}
 
 	networkEndpointGroupName := getNetworkEndpointGroupName(tagInfo)
@@ -133,17 +98,17 @@ func handleService(tag string, updates <-chan *registry.ServiceUpdate, wg sync.W
 						continue
 					}
 
-					if err := client.AddHealthCheck(networkEndpointGroupName, getHealthCheckPath(tag)); err != nil {
+					if err := client.AddHealthCheck(networkEndpointGroupName, getHealthCheckPath(c, tag)); err != nil {
 						lock.Unlock()
 						continue
 					}
 
-					if err = client.CreateBackendService(networkEndpointGroupName, tagInfo.Affinity, tagInfo.Cdn); err != nil {
+					if err = client.CreateBackendService(networkEndpointGroupName, tagInfo.Affinity, tagInfo.CDN); err != nil {
 						lock.Unlock()
 						continue
 					}
 
-					if err := client.UpdateUrlMap(cfg.Cloud.UrlMap, networkEndpointGroupName, tagInfo.Host, tagInfo.Path); err != nil {
+					if err := client.UpdateUrlMap(c.Cloud.URLMap, networkEndpointGroupName, tagInfo.Host, tagInfo.Path); err != nil {
 						lock.Unlock()
 						continue
 					}
@@ -241,7 +206,7 @@ func handleService(tag string, updates <-chan *registry.ServiceUpdate, wg sync.W
 }
 
 // Handles updates for all services and dispatch them between specific per service handlers.
-func handleServices(updates <-chan *registry.ServiceUpdate, done chan struct{}) {
+func handleServices(c *configuration, client cloud.Cloud, tagParser *TagParser, updates <-chan *registry.ServiceUpdate, done chan struct{}) {
 	var wg sync.WaitGroup
 	handlers := make(map[string]chan *registry.ServiceUpdate)
 
@@ -255,7 +220,7 @@ func handleServices(updates <-chan *registry.ServiceUpdate, done chan struct{}) 
 				handlers[update.ServiceName] = handler
 				// start handler in its own goroutine
 				wg.Add(1)
-				go handleService(update.Tag, handler, wg, done)
+				go handleService(c, client, tagParser, update.Tag, handler, wg, done)
 			}
 			// send update to handler
 			handlers[update.ServiceName] <- update
@@ -267,24 +232,23 @@ func handleServices(updates <-chan *registry.ServiceUpdate, done chan struct{}) 
 	}
 }
 
-func getNetworkEndpointGroupName(tagInfo tagparser.TagInfo) string {
-	return fmt.Sprintf("neg-%s-%s-%s", getCdnType(tagInfo.Cdn), tagInfo.Affinity, normalizeHost(tagInfo.Host))
+func getNetworkEndpointGroupName(tagInfo *TagInfo) string {
+	return fmt.Sprintf("neg-%s-%s-%s", getCDNType(tagInfo.CDN), tagInfo.Affinity, normalizeHost(tagInfo.Host))
 }
 
-func getCdnType(cdn bool) string {
+func getCDNType(cdn bool) string {
 	if cdn {
 		return "cdn"
-	} else {
-		return "nocdn"
 	}
+	return "nocdn"
 }
 
 func normalizeHost(host string) string {
 	return strings.Replace(host, ".", "-", -1)
 }
 
-func getHealthCheckPath(tag string) string {
-	if healthCheckPath, ok := cfg.Consul.HealthChecksPaths[tag]; ok {
+func getHealthCheckPath(c *configuration, tag string) string {
+	if healthCheckPath, ok := c.Consul.HealthChecksPaths[tag]; ok {
 		return healthCheckPath
 	}
 

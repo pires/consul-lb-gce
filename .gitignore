@@ -19,7 +19,7 @@ pkg
 *.toml
 *.json
 
-src/github.com/pires/consul-lb-google/consul-lb-google
-src/github.com/pires/consul-lb-google/vendor/**
+src/github.com/dffrntmedia/consul-lb-gce/consul-lb-google
+src/github.com/dffrntmedia/consul-lb-gce/vendor/**
 
 **/.DS_Store

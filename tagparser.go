@@ -1,58 +1,47 @@
-package tagparser
+package main
 
 import (
-	"errors"
 	"fmt"
 	"regexp"
 )
 
-var (
-	ErrCantParseTag = errors.New("Can't parse tag")
-)
-
 type TagInfo struct {
 	Tag      string
-	Cdn      bool
+	CDN      bool
 	Affinity string
 	Host     string
 	Path     string
 }
 
-type TagParser interface {
-	Parse(tag string) (TagInfo, error)
-}
-
-type TagParserImpl struct {
+type TagParser struct {
 	tagPrefix string
 	tagRegExp *regexp.Regexp
 }
 
-func (parser *TagParserImpl) Parse(tag string) (TagInfo, error) {
+func (parser *TagParser) Parse(tag string) (*TagInfo, error) {
 	matched := parser.tagRegExp.FindStringSubmatch(tag)
-
 	if matched == nil {
-		return TagInfo{}, ErrCantParseTag
+		return nil, fmt.Errorf("Can't parse tag: %s", tag)
 	}
 
 	parsed := make(map[string]string)
-
 	for i, name := range parser.tagRegExp.SubexpNames() {
 		if i != 0 && name != "" {
 			parsed[name] = matched[i]
 		}
 	}
 
-	return TagInfo{
+	return &TagInfo{
 		Tag:      tag,
-		Cdn:      parsed["cdn"] == "cdn",
+		CDN:      parsed["cdn"] == "cdn",
 		Affinity: parsed["affinity"],
 		Host:     parsed["host"],
 		Path:     parsed["path"],
 	}, nil
 }
 
-func New(tagPrefix string) TagParser {
-	return &TagParserImpl{
+func newTagParser(tagPrefix string) *TagParser {
+	return &TagParser{
 		tagPrefix: tagPrefix,
 		tagRegExp: regexp.MustCompile(fmt.Sprintf("^%s(?P<cdn>cdn|nocdn):(?P<affinity>(no|ip|ipport)affinity):(?P<host>[a-z0-9-\\.]+)(?P<path>/.*)$", tagPrefix)),
 	}
