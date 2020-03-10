@@ -1,7 +1,7 @@
 .PHONY: up
 ## up: runs application
 up:
-	@go run $(ls | grep -v _test.go | grep .go)
+	@go run $$(ls | grep -v _test.go | grep .go)
 
 .PHONY: release
 ## release: builds application for linux

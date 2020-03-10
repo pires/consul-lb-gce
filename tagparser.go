@@ -5,7 +5,7 @@ import (
 	"regexp"
 )
 
-type TagInfo struct {
+type tagInfo struct {
 	Tag      string
 	CDN      bool
 	Affinity string
@@ -13,25 +13,25 @@ type TagInfo struct {
 	Path     string
 }
 
-type TagParser struct {
-	tagPrefix string
-	tagRegExp *regexp.Regexp
+type tagParser struct {
+	prefix string
+	regexp *regexp.Regexp
 }
 
-func (parser *TagParser) Parse(tag string) (*TagInfo, error) {
-	matched := parser.tagRegExp.FindStringSubmatch(tag)
+func (p *tagParser) Parse(tag string) (*tagInfo, error) {
+	matched := p.regexp.FindStringSubmatch(tag)
 	if matched == nil {
 		return nil, fmt.Errorf("Can't parse tag: %s", tag)
 	}
 
 	parsed := make(map[string]string)
-	for i, name := range parser.tagRegExp.SubexpNames() {
+	for i, name := range p.regexp.SubexpNames() {
 		if i != 0 && name != "" {
 			parsed[name] = matched[i]
 		}
 	}
 
-	return &TagInfo{
+	return &tagInfo{
 		Tag:      tag,
 		CDN:      parsed["cdn"] == "cdn",
 		Affinity: parsed["affinity"],
@@ -40,9 +40,14 @@ func (parser *TagParser) Parse(tag string) (*TagInfo, error) {
 	}, nil
 }
 
-func newTagParser(tagPrefix string) *TagParser {
-	return &TagParser{
-		tagPrefix: tagPrefix,
-		tagRegExp: regexp.MustCompile(fmt.Sprintf("^%s(?P<cdn>cdn|nocdn):(?P<affinity>(no|ip|ipport)affinity):(?P<host>[a-z0-9-\\.]+)(?P<path>/.*)$", tagPrefix)),
+func newTagParser(prefix string) *tagParser {
+	return &tagParser{
+		prefix: prefix,
+		regexp: regexp.MustCompile(
+			fmt.Sprintf(
+				"^%s(?P<cdn>cdn|nocdn):(?P<affinity>(no|ip|ipport)affinity):(?P<host>[a-z0-9-\\.]+)(?P<path>/.*)$",
+				prefix,
+			),
+		),
 	}
 }

@@ -26,7 +26,7 @@ func main() {
 		glog.Fatal("Configuration path is required")
 	}
 
-	glog.Infof("Reading configuration from %s", configurationPath)
+	glog.Infof("Reading configuration from %s ...", configurationPath)
 	var c configuration
 	if _, err := toml.DecodeFile(configurationPath, &c); err != nil {
 		glog.Fatal(err)
@@ -34,13 +34,18 @@ func main() {
 
 	tagParser := newTagParser(c.TagParser.TagPrefix)
 
-	glog.Infof("Initializing cloud client [Project ID: %s, Network: %s, Allowed Zones: %v]", c.Cloud.Project, c.Cloud.Network, c.Cloud.AllowedZones)
+	glog.Infof(
+		"Initializing cloud client with project ID: %s, network: %s, allowed zones: [%v] ...",
+		c.Cloud.Project,
+		c.Cloud.Network,
+		strings.Join(c.Cloud.AllowedZones, ", "),
+	)
 	client, err := cloud.New(c.Cloud.Project, c.Cloud.Network, c.Cloud.AllowedZones)
 	if err != nil {
 		glog.Fatal(err)
 	}
 
-	glog.Infof("Connecting to Consul at %s", c.Consul.URL)
+	glog.Infof("Connecting to Consul at %s...", c.Consul.URL)
 	r, err := consul.NewRegistry(&registry.Config{
 		Addresses:   []string{c.Consul.URL},
 		TagsToWatch: c.Consul.TagsToWatch,
@@ -62,17 +67,25 @@ func main() {
 	signal.Notify(osSignalChannel, os.Interrupt, os.Kill)
 	<-osSignalChannel
 
-	glog.Info("Terminating all pending jobs..")
+	glog.Info("Terminating all pending jobs...")
 	close(done)
 	glog.Info("Terminated")
 }
 
 // handleService handles service updates in a consistent way.
 // It will run until service is deleted or done is closed.
-func handleService(c *configuration, client cloud.Cloud, tagParser *TagParser, tag string, updates <-chan *registry.ServiceUpdate, wg sync.WaitGroup, done chan struct{}) {
+func handleService(
+	c *configuration,
+	client cloud.Cloud,
+	tagParser *tagParser,
+	tag string,
+	updates <-chan *registry.ServiceUpdate,
+	wg *sync.WaitGroup,
+	done chan struct{},
+) {
 	tagInfo, err := tagParser.Parse(tag)
 	if err != nil {
-		glog.Errorf("Failed parsing tag [%s]. %s", tag, err)
+		glog.Error(err)
 		return
 	}
 
@@ -98,7 +111,12 @@ func handleService(c *configuration, client cloud.Cloud, tagParser *TagParser, t
 						continue
 					}
 
-					if err := client.AddHealthCheck(networkEndpointGroupName, getHealthCheckPath(c, tag)); err != nil {
+					hcPath, err := c.Consul.GetHealthCheckPath(tag)
+					if err != nil {
+						glog.Error(err)
+						continue
+					}
+					if err := client.AddHealthCheck(networkEndpointGroupName, hcPath); err != nil {
 						lock.Unlock()
 						continue
 					}
@@ -108,7 +126,7 @@ func handleService(c *configuration, client cloud.Cloud, tagParser *TagParser, t
 						continue
 					}
 
-					if err := client.UpdateUrlMap(c.Cloud.URLMap, networkEndpointGroupName, tagInfo.Host, tagInfo.Path); err != nil {
+					if err := client.UpdateURLMap(c.Cloud.URLMap, networkEndpointGroupName, tagInfo.Host, tagInfo.Path); err != nil {
 						lock.Unlock()
 						continue
 					}
@@ -125,7 +143,7 @@ func handleService(c *configuration, client cloud.Cloud, tagParser *TagParser, t
 					for k, instance := range instances {
 						toRemove = append(toRemove, gce.NetworkEndpoint{
 							Instance: util.NormalizeInstanceName(instance.Host),
-							Ip:       instance.Address,
+							IP:       instance.Address,
 							Port:     instance.Port,
 						})
 						delete(instances, k)
@@ -159,7 +177,7 @@ func handleService(c *configuration, client cloud.Cloud, tagParser *TagParser, t
 					if _, ok := update.ServiceInstances[k]; !ok {
 						toRemove = append(toRemove, gce.NetworkEndpoint{
 							Instance: util.NormalizeInstanceName(instance.Host),
-							Ip:       instance.Address,
+							IP:       instance.Address,
 							Port:     instance.Port,
 						})
 						delete(instances, k)
@@ -172,7 +190,7 @@ func handleService(c *configuration, client cloud.Cloud, tagParser *TagParser, t
 					if _, ok := instances[k]; !ok {
 						toAdd = append(toAdd, gce.NetworkEndpoint{
 							Instance: util.NormalizeInstanceName(instance.Host),
-							Ip:       instance.Address,
+							IP:       instance.Address,
 							Port:     instance.Port,
 						})
 						instances[k] = instance
@@ -206,7 +224,7 @@ func handleService(c *configuration, client cloud.Cloud, tagParser *TagParser, t
 }
 
 // Handles updates for all services and dispatch them between specific per service handlers.
-func handleServices(c *configuration, client cloud.Cloud, tagParser *TagParser, updates <-chan *registry.ServiceUpdate, done chan struct{}) {
+func handleServices(c *configuration, cloud cloud.Cloud, tagParser *tagParser, updates <-chan *registry.ServiceUpdate, done chan struct{}) {
 	var wg sync.WaitGroup
 	handlers := make(map[string]chan *registry.ServiceUpdate)
 
@@ -220,7 +238,7 @@ func handleServices(c *configuration, client cloud.Cloud, tagParser *TagParser, 
 				handlers[update.ServiceName] = handler
 				// start handler in its own goroutine
 				wg.Add(1)
-				go handleService(c, client, tagParser, update.Tag, handler, wg, done)
+				go handleService(c, cloud, tagParser, update.Tag, handler, &wg, done)
 			}
 			// send update to handler
 			handlers[update.ServiceName] <- update
@@ -232,25 +250,13 @@ func handleServices(c *configuration, client cloud.Cloud, tagParser *TagParser, 
 	}
 }
 
-func getNetworkEndpointGroupName(tagInfo *TagInfo) string {
-	return fmt.Sprintf("neg-%s-%s-%s", getCDNType(tagInfo.CDN), tagInfo.Affinity, normalizeHost(tagInfo.Host))
-}
-
-func getCDNType(cdn bool) string {
-	if cdn {
-		return "cdn"
+func getNetworkEndpointGroupName(tagInfo *tagInfo) string {
+	var cdn string
+	if tagInfo.CDN {
+		cdn = "cdn"
+	} else {
+		cdn = "nocdn"
 	}
-	return "nocdn"
-}
-
-func normalizeHost(host string) string {
-	return strings.Replace(host, ".", "-", -1)
-}
-
-func getHealthCheckPath(c *configuration, tag string) string {
-	if healthCheckPath, ok := c.Consul.HealthChecksPaths[tag]; ok {
-		return healthCheckPath
-	}
-
-	return ""
+	normalizedHost := strings.Replace(tagInfo.Host, ".", "-", -1)
+	return fmt.Sprintf("neg-%s-%s-%s", cdn, tagInfo.Affinity, normalizedHost)
 }

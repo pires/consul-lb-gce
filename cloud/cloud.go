@@ -24,11 +24,11 @@ type Cloud interface {
 	CreateBackendService(groupName, affinity string, cdn bool) error
 
 	// Updates existing load-balancer related to a group
-	UpdateUrlMap(urlMapName, groupName, host, path string) error
+	UpdateURLMap(urlMapName, groupName, host, path string) error
 }
 
 type gceCloud struct {
-	client *gce.GCEClient
+	client *gce.Client
 
 	lock *sync.RWMutex
 
@@ -37,7 +37,7 @@ type gceCloud struct {
 }
 
 func New(projectID string, network string, allowedZones []string) (Cloud, error) {
-	c, err := gce.CreateGCECloud(projectID, network)
+	c, err := gce.New(projectID, network)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func (c *gceCloud) CreateNetworkEndpointGroup(groupName string) error {
 }
 
 func (c *gceCloud) AddHealthCheck(groupName, path string) error {
-	if err := c.client.CreateHttpHealthCheck(groupName, path); err != nil {
+	if err := c.client.CreateHTTPHealthCheck(groupName, path); err != nil {
 		glog.Errorf("Failed creating health check. %s", err)
 		return err
 	}
@@ -116,14 +116,14 @@ func (c *gceCloud) CreateBackendService(groupName string, affinity string, cdn b
 	return nil
 }
 
-func (c *gceCloud) UpdateUrlMap(urlMapName, groupName string, host, path string) error {
+func (c *gceCloud) UpdateURLMap(urlMapName, groupName string, host, path string) error {
 	defer c.lock.Unlock()
 	c.lock.Lock()
 
 	glog.Infof("Updating url map [%s].", urlMapName)
 
 	for _, zone := range c.zones {
-		err := c.client.UpdateUrlMap(urlMapName, util.Zonify(zone, groupName), host, path)
+		err := c.client.UpdateURLMap(urlMapName, util.Zonify(zone, groupName), host, path)
 		if err != nil {
 			glog.Errorf("Failed updating url map [%s]. %s", urlMapName, err)
 			return err

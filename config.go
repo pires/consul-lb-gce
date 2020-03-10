@@ -1,5 +1,7 @@
 package main
 
+import "fmt"
+
 type tagParserConfiguration struct {
 	TagPrefix string `toml:"tag_prefix"`
 }
@@ -7,7 +9,7 @@ type tagParserConfiguration struct {
 type consulConfiguration struct {
 	URL         string   `toml:"url"`
 	TagsToWatch []string `toml:"tags_to_watch"`
-	// NOTE: Since we can't retrieve health checks definitions from Consul we must explicitly define them in configuration
+	// NOTE: We specify it explicitly in configuration coz Consul doesn't provide this information via API
 	HealthChecksPaths map[string]string `toml:"health_checks_paths"`
 }
 
@@ -22,4 +24,11 @@ type configuration struct {
 	TagParser tagParserConfiguration
 	Consul    consulConfiguration
 	Cloud     cloudConfiguration
+}
+
+func (c *consulConfiguration) GetHealthCheckPath(tag string) (string, error) {
+	if v, ok := c.HealthChecksPaths[tag]; ok {
+		return v, nil
+	}
+	return "", fmt.Errorf("Health check path is not provided for tag %s", tag)
 }

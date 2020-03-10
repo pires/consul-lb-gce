@@ -4,36 +4,22 @@ import (
 	"testing"
 )
 
-func TestGetPathRule(t *testing.T) {
+func TestMakePathRule(t *testing.T) {
+	backend := "backend.service"
+
 	path := "/"
-	backendServiceLink := "backend.service"
-
-	pathRule := GetPathRule(path, backendServiceLink)
-
-	if pathRule != nil {
+	rule := makePathRule(path, backend)
+	if rule != nil {
 		t.Fail()
 	}
 
 	path = "/test"
-
-	pathRule = GetPathRule(path, backendServiceLink)
-
-	paths := pathRule.Paths
-
+	rule = makePathRule(path, backend)
+	paths := rule.Paths
 	if !contain(paths, path) || !contain(paths, path+"/*") || len(paths) > 2 {
 		t.Fail()
 	}
-
-	if pathRule.Service != backendServiceLink {
+	if rule.Service != backend {
 		t.Fail()
 	}
-}
-
-func contain(arrayOfStrings []string, target string) bool {
-	for _, s := range arrayOfStrings {
-		if s == target {
-			return true
-		}
-	}
-	return false
 }
