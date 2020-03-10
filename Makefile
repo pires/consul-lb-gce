@@ -18,3 +18,13 @@ fmt:
 test:
 	@go test -v  ./...
 
+.PHONY: help
+## help: prints help message
+help:
+	@echo "Consul LB GCE"
+	@echo
+	@echo "Usage:"
+	@echo
+	@sed -n 's/^##//p' ${MAKEFILE_LIST} | column -t -s ':' | sed -e 's/^/ /'
+	@echo
+
