@@ -19,9 +19,11 @@ pkg
 *.toml
 *.json
 
-## binaries
-consul-lb-gce
-lb
+## binary
+consul-lb-google
 
 ## MacOS
 **/.DS_Store
+
+## configuration
+config.toml

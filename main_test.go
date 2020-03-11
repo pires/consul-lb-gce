@@ -9,3 +9,17 @@ func TestNormalizeInstanceName(t *testing.T) {
 		t.Fatalf("%s is not equal %s", actual, expected)
 	}
 }
+
+func TestMakeName(t *testing.T) {
+	expected := "bs-name"
+	actual := makeName("bs", "name")
+	if actual != expected {
+		t.Fatalf("%s is not equal %s", actual, expected)
+	}
+
+	expected = "bs-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	actual = makeName("bs", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	if actual != expected {
+		t.Fatalf("%s is not equal %s", actual, expected)
+	}
+}

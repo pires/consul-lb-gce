@@ -137,7 +137,9 @@ func handleService(
 
 					// NOTE: Create necessary DNS record sets yourself.
 
+					glog.Infof("Creating network endpoint group %s ...", makeName("neg", serviceGroupName))
 					if err := client.CreateNetworkEndpointGroup(makeName("neg", serviceGroupName)); err != nil {
+						glog.Errorf("Can't create network endpoint group %s: %v", makeName("neg", serviceGroupName), err)
 						lock.Unlock()
 						continue
 					}
@@ -147,11 +149,14 @@ func handleService(
 						glog.Error(err)
 						continue
 					}
+					glog.Infof("Creating health check %s ...", makeName("hc", serviceGroupName))
 					if err := client.CreateHealthCheck(makeName("hc", serviceGroupName), hcPath); err != nil {
+						glog.Errorf("Can't create health check %s: %v", makeName("hc", serviceGroupName), err)
 						lock.Unlock()
 						continue
 					}
 
+					glog.Infof("Creating backend service %s ...", makeName("bs", serviceGroupName))
 					if err = client.CreateBackendService(
 						makeName("bs", serviceGroupName),
 						makeName("neg", serviceGroupName),
@@ -159,16 +164,19 @@ func handleService(
 						tagInfo.Affinity,
 						tagInfo.CDN,
 					); err != nil {
+						glog.Errorf("Can't create backend service %s: %v", makeName("bs", serviceGroupName), err)
 						lock.Unlock()
 						continue
 					}
 
+					glog.Infof("Updating URL map %s ...", c.Cloud.URLMap)
 					if err := client.UpdateURLMap(
 						c.Cloud.URLMap,
-						makeName("neg", serviceGroupName),
+						makeName("bs", serviceGroupName),
 						tagInfo.Host,
 						tagInfo.Path,
 					); err != nil {
+						glog.Errorf("Can't update URL map %s: %v", c.Cloud.URLMap, err)
 						lock.Unlock()
 						continue
 					}
@@ -268,7 +276,10 @@ func handleService(
 // NOTE: Maximum length of resource name is 63 and name must start and end with letter or digit
 func makeName(prefix string, name string) string {
 	n := strings.Join([]string{prefix, name}, "-")
-	return strings.TrimLeft(n[:maximumNameLength], "-")
+	if len(n) > maximumNameLength {
+		n = strings.TrimLeft(n[:maximumNameLength], "-")
+	}
+	return n
 }
 
 func normalizeInstanceName(name string) string {

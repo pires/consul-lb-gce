@@ -6,7 +6,7 @@ up:
 .PHONY: release
 ## release: builds application for linux
 release:
-	@GOOS=linux GOARCH=amd64 go build -o lb
+	@GOOS=linux GOARCH=amd64 go build -o consul-lb-google
 
 .PHONY: fmt
 ## fmt: formats source code

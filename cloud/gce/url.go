@@ -35,5 +35,5 @@ func (gce *Client) makeCreateHealthCheckURL() string {
 }
 
 func (gce *Client) makeCreateBackendServiceURL() string {
-	return fmt.Sprintf("%s/projects/%s/global/backendServices", gce.projectID)
+	return fmt.Sprintf("%s/projects/%s/global/backendServices", googleComputeAPIHost, gce.projectID)
 }

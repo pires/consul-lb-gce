@@ -35,26 +35,26 @@ func (gce *Client) makeCreateHealthCheckBody(name, path string) *bytes.Buffer {
 		"kind": "compute#healthCheck",
 		"type": "HTTP",
 		"httpHealthCheck": {
-    		"portSpecification": "USE_SERVING_PORT",
-    		"requestPath": "%s"
+			"portSpecification": "USE_SERVING_PORT",
+			"requestPath": "%s"
 		},
 		"timeoutSec": 2,
 		"checkIntervalSec": 2,
-  		"healthyThreshold": 2,
+		"healthyThreshold": 2,
 		"unhealthyThreshold": 2
 	}`, name, path)))
 }
 
 func (gce *Client) makeCreateBackendServiceBody(name, groupName, healthCheckName, zone string, cdn bool, affinity string) *bytes.Buffer {
 	return bytes.NewBuffer([]byte(fmt.Sprintf(`{
-  		"name": "%s",
-  		"description": "Managed by consul-lb-google",
-  		"backends": [
+		"name": "%s",
+		"description": "Managed by consul-lb-google",
+		"backends": [
 			{
-      			"group": "%s",
-      			"balancingMode": "RATE",
-      			"maxRatePerEndpoint": 5
-    		}
+				"group": "%s",
+				"balancingMode": "RATE",
+				"maxRatePerEndpoint": 1000
+			}
 		],
   		"healthChecks": [
 			"%s"

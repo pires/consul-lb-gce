@@ -55,8 +55,8 @@ func (c *gceCloud) CreateBackendService(bsName string, negName string, hcName st
 	return c.client.CreateBackendService(bsName, negName, hcName, c.zone, affinity, cdn)
 }
 
-func (c *gceCloud) UpdateURLMap(urlMapName string, negName string, host string, path string) error {
+func (c *gceCloud) UpdateURLMap(urlMapName string, bsName string, host string, path string) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
-	return c.client.UpdateURLMap(urlMapName, negName, host, path)
+	return c.client.UpdateURLMap(urlMapName, bsName, host, path)
 }
