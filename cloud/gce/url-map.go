@@ -3,23 +3,17 @@ package gce
 import (
 	"strings"
 
-	"github.com/golang/glog"
 	"google.golang.org/api/compute/v1"
 )
 
-// UpdateURLMap updates an url map, using the given backend service as the default service.
-func (gce *Client) UpdateURLMap(urlMapName, backendServiceName, host, path string) error {
+// UpdateURLMap updates a url map using the given backend service as the default service.
+func (gce *Client) UpdateURLMap(urlMapName, bsName, host, path string) error {
 	urlMap, err := gce.service.UrlMaps.Get(gce.projectID, urlMapName).Do()
-
 	if err != nil {
-		glog.Errorf("Can't get url map %s", err)
 		return err
 	}
-
-	backend, err := gce.GetBackendService(backendServiceName)
-
+	backend, err := gce.service.BackendServices.Get(gce.projectID, bsName).Do()
 	if err != nil {
-		glog.Errorf("Can't get backend service %s", err)
 		return err
 	}
 
@@ -75,14 +69,10 @@ func (gce *Client) UpdateURLMap(urlMapName, backendServiceName, host, path strin
 
 	if existingHostRule == nil {
 		op, err := gce.service.UrlMaps.Update(gce.projectID, urlMap.Name, urlMap).Do()
-
 		if err != nil {
 			return err
 		}
-
-		if err = gce.waitForGlobalOp(op); err != nil {
-			return err
-		}
+		return gce.waitForGlobalOp(op)
 	}
 
 	return nil

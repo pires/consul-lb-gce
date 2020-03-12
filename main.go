@@ -133,13 +133,12 @@ func handleService(
 			case registry.NEW:
 				lock.Lock()
 				if !isRunning {
-					glog.Infof("Initializing service with tag [%s]..", tag)
+					glog.Infof("Initializing service with tag %s ...", tag)
 
-					// NOTE: Create necessary DNS record sets yourself.
-
-					glog.Infof("Creating network endpoint group %s ...", makeName("neg", serviceGroupName))
-					if err := client.CreateNetworkEndpointGroup(makeName("neg", serviceGroupName)); err != nil {
-						glog.Errorf("Can't create network endpoint group %s: %v", makeName("neg", serviceGroupName), err)
+					negName := makeName("neg", serviceGroupName)
+					glog.Infof("Creating network endpoint group %s ...", negName)
+					if err := client.CreateNetworkEndpointGroup(negName); err != nil {
+						glog.Errorf("Can't create network endpoint group %s: %v", negName, err)
 						lock.Unlock()
 						continue
 					}
@@ -149,22 +148,24 @@ func handleService(
 						glog.Error(err)
 						continue
 					}
-					glog.Infof("Creating health check %s ...", makeName("hc", serviceGroupName))
-					if err := client.CreateHealthCheck(makeName("hc", serviceGroupName), hcPath); err != nil {
-						glog.Errorf("Can't create health check %s: %v", makeName("hc", serviceGroupName), err)
+					hcName := makeName("hc", serviceGroupName)
+					glog.Infof("Creating health check %s ...", hcName)
+					if err := client.CreateHealthCheck(hcName, hcPath); err != nil {
+						glog.Errorf("Can't create health check %s: %v", hcName, err)
 						lock.Unlock()
 						continue
 					}
 
-					glog.Infof("Creating backend service %s ...", makeName("bs", serviceGroupName))
+					bsName := makeName("bs", serviceGroupName)
+					glog.Infof("Creating backend service %s ...", bsName)
 					if err = client.CreateBackendService(
-						makeName("bs", serviceGroupName),
-						makeName("neg", serviceGroupName),
-						makeName("hc", serviceGroupName),
+						bsName,
+						negName,
+						hcName,
 						tagInfo.Affinity,
 						tagInfo.CDN,
 					); err != nil {
-						glog.Errorf("Can't create backend service %s: %v", makeName("bs", serviceGroupName), err)
+						glog.Errorf("Can't create backend service %s: %v", bsName, err)
 						lock.Unlock()
 						continue
 					}
@@ -172,7 +173,7 @@ func handleService(
 					glog.Infof("Updating URL map %s ...", c.Cloud.URLMap)
 					if err := client.UpdateURLMap(
 						c.Cloud.URLMap,
-						makeName("bs", serviceGroupName),
+						bsName,
 						tagInfo.Host,
 						tagInfo.Path,
 					); err != nil {

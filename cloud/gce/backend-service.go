@@ -7,18 +7,12 @@ import (
 
 	"github.com/dffrntmedia/consul-lb-gce/util"
 	"github.com/golang/glog"
-	"google.golang.org/api/compute/v1"
 )
 
 const (
 	gceAffinityTypeNone     = "NONE"
 	gceAffinityTypeClientIP = "CLIENT_IP"
 )
-
-// GetBackendService retrieves a backend by name.
-func (gce *Client) GetBackendService(bsName string) (*compute.BackendService, error) {
-	return gce.service.BackendServices.Get(gce.projectID, bsName).Do()
-}
 
 // CreateBackendService creates backend service based on NEG
 func (gce *Client) CreateBackendService(bsName, negName, hcName, zone, affinity string, cdn bool) error {
@@ -43,7 +37,7 @@ func (gce *Client) CreateBackendService(bsName, negName, hcName, zone, affinity 
 			}`,
 			bsName,
 			gce.makeNetworkEndpointGroupURL(negName, zone),
-			gce.makeHealthCheckURL(hcName),
+			fmt.Sprintf("%s/projects/%s/global/healthChecks/%s", googleComputeAPIHost, gce.projectID, hcName),
 			cdn,
 			getAffinityOption(affinity),
 		))),
@@ -60,20 +54,7 @@ func (gce *Client) CreateBackendService(bsName, negName, hcName, zone, affinity 
 		glog.Infof("Backend service %s alredy exists", bsName)
 		return nil
 	}
-	sop, err := parseSimpleOperation(res)
-	if err != nil {
-		return err
-	}
-	if simpleOperationIsDone(sop) {
-		glog.Infof("No wating for backend service %s creation finished", bsName)
-		return nil
-	}
-	op, err := gce.service.GlobalOperations.Get(gce.projectID, sop.ID).Do()
-	if err != nil {
-		return err
-	}
-	glog.Infof("Waiting for backend service %s creation finished", bsName)
-	return gce.waitForGlobalOp(op)
+	return gce.waitForOpFromHTTPResponse(res, "global", fmt.Sprintf("backend service %s creation", bsName))
 }
 
 func getAffinityOption(affinity string) string {
@@ -85,4 +66,8 @@ func getAffinityOption(affinity string) string {
 	default:
 		return gceAffinityTypeNone
 	}
+}
+
+func (gce *Client) makeNetworkEndpointGroupURL(neg, zone string) string {
+	return fmt.Sprintf("%s/projects/%s/zones/%s/networkEndpointGroups/%s", googleComputeAPIHost, gce.projectID, zone, neg)
 }

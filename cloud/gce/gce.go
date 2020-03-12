@@ -1,6 +1,7 @@
 package gce
 
 import (
+	"fmt"
 	"net/http"
 
 	"google.golang.org/api/dns/v1"
@@ -26,6 +27,10 @@ type Client struct {
 	networkURL string
 }
 
+const (
+	googleComputeAPIHost = "https://www.googleapis.com/compute/v1"
+)
+
 // New creates new instance of Client.
 func New(project string, network string) (*Client, error) {
 	// Use oauth2.NoContext if there isn't a good context to pass in.
@@ -45,13 +50,13 @@ func New(project string, network string) (*Client, error) {
 		return nil, err
 	}
 
-	// TODO validate project and network exist
-
+	// TODO(max): Validate project and network exist
 	return &Client{
 		httpClient: client,
 		service:    svc,
 		dnsService: dnsService,
 		projectID:  project,
-		networkURL: makeNetworkURL(project, network),
+		// TODO(max): Consider zoned network
+		networkURL: fmt.Sprintf("%s/projects/%s/global/networks/%s", googleComputeAPIHost, project, network),
 	}, nil
 }

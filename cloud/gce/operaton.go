@@ -17,7 +17,12 @@ const (
 	operationPollTimeoutDuration = 30 * time.Minute
 )
 
-func waitForOp(op *compute.Operation, getOperation func(operationName string) (*compute.Operation, error)) error {
+type simpleOperation struct {
+	ID     string
+	Status string
+}
+
+func waitForOp(op *compute.Operation, getOperation func() (*compute.Operation, error)) error {
 	if op == nil {
 		return fmt.Errorf("operation must not be nil")
 	}
@@ -26,9 +31,8 @@ func waitForOp(op *compute.Operation, getOperation func(operationName string) (*
 		return getErrorFromOp(op)
 	}
 
-	opName := op.Name
 	return wait.Poll(operationPollInterval, operationPollTimeoutDuration, func() (bool, error) {
-		pollOp, err := getOperation(opName)
+		pollOp, err := getOperation()
 		if err != nil {
 			glog.Warningf("GCE poll operation failed: %v", err)
 		}
@@ -54,24 +58,40 @@ func getErrorFromOp(op *compute.Operation) error {
 }
 
 func (gce *Client) waitForGlobalOp(op *compute.Operation) error {
-	return waitForOp(op, func(operationName string) (*compute.Operation, error) {
-		return gce.service.GlobalOperations.Get(gce.projectID, operationName).Do()
+	return waitForOp(op, func() (*compute.Operation, error) {
+		return gce.service.GlobalOperations.Get(gce.projectID, op.Name).Do()
 	})
 }
 
-// func (gce *Client) waitForZondeOp(id string, zone string) error {
-// }
-
-type simpleOperation struct {
-	ID     string
-	Status string
+// waitForOp waits for operation finished.
+// if zone is "global" then operation is considered as global.
+func (gce *Client) waitForOp(id string, zone string) error {
+	var opProvider func() (*compute.Operation, error)
+	if zone == "global" {
+		opProvider = func() (*compute.Operation, error) {
+			return gce.service.GlobalOperations.Get(gce.projectID, id).Do()
+		}
+	} else {
+		opProvider = func() (*compute.Operation, error) {
+			return gce.service.ZoneOperations.Get(gce.projectID, zone, id).Do()
+		}
+	}
+	op, err := opProvider()
+	if err != nil {
+		return err
+	}
+	return waitForOp(op, opProvider)
 }
 
-func parseSimpleOperation(res *http.Response) (*simpleOperation, error) {
+func (gce *Client) waitForOpFromHTTPResponse(res *http.Response, zone string, opDesc string) error {
 	var op simpleOperation
-	return &op, util.ParseBody(res.Body, &op)
-}
-
-func simpleOperationIsDone(op *simpleOperation) bool {
-	return op != nil && op.Status == "DONE"
+	if err := util.ParseBody(res.Body, &op); err != nil {
+		return err
+	}
+	if op.Status == "DONE" {
+		glog.Infof("Operation '%s' finished during request", opDesc)
+		return nil
+	}
+	glog.Infof("Waiting for '%s' operation finished", opDesc)
+	return gce.waitForOp(op.ID, zone)
 }
