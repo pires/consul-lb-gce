@@ -1,9 +1,12 @@
 package gce
 
 import (
+	"bytes"
+	"fmt"
 	"net/http"
 
 	"github.com/dffrntmedia/consul-lb-gce/util"
+	"github.com/golang/glog"
 	"google.golang.org/api/compute/v1"
 )
 
@@ -17,26 +20,60 @@ func (gce *Client) GetBackendService(bsName string) (*compute.BackendService, er
 	return gce.service.BackendServices.Get(gce.projectID, bsName).Do()
 }
 
-// CreateBackendService creates backend service in specified zone based on NEG.
+// CreateBackendService creates backend service based on NEG
 func (gce *Client) CreateBackendService(bsName, negName, hcName, zone, affinity string, cdn bool) error {
-	request, err := http.NewRequest(
+	req, err := http.NewRequest(
 		"POST",
-		gce.makeCreateBackendServiceURL(),
-		gce.makeCreateBackendServiceBody(
+		fmt.Sprintf("%s/projects/%s/global/backendServices", googleComputeAPIHost, gce.projectID),
+		bytes.NewBuffer([]byte(fmt.Sprintf(`{
+				"name": "%s",
+				"description": "Managed by consul-lb-gce",
+				"backends": [
+					{
+						"group": "%s",
+						"balancingMode": "RATE",
+						"maxRatePerEndpoint": 10000
+					}
+				],
+				"healthChecks": [
+					"%s"
+				],
+				"enableCDN": %t,
+				"sessionAffinity": "%s"
+			}`,
 			bsName,
-			negName,
-			hcName,
-			zone,
+			gce.makeNetworkEndpointGroupURL(negName, zone),
+			gce.makeHealthCheckURL(hcName),
 			cdn,
 			getAffinityOption(affinity),
-		),
+		))),
 	)
 	if err != nil {
 		return err
 	}
-	request.Header.Add("Content-Type", "application/json")
-	_, err = util.SendHTTPRequest(gce.httpClient, request, []int{http.StatusOK, http.StatusConflict})
-	return err
+	req.Header.Add("Content-Type", "application/json")
+	res, err := util.SendHTTPRequest(gce.httpClient, req, []int{http.StatusOK, http.StatusConflict})
+	if err != nil {
+		return err
+	}
+	if res.StatusCode == http.StatusConflict {
+		glog.Infof("Backend service %s alredy exists", bsName)
+		return nil
+	}
+	sop, err := parseSimpleOperation(res)
+	if err != nil {
+		return err
+	}
+	if simpleOperationIsDone(sop) {
+		glog.Infof("No wating for backend service %s creation finished", bsName)
+		return nil
+	}
+	op, err := gce.service.GlobalOperations.Get(gce.projectID, sop.ID).Do()
+	if err != nil {
+		return err
+	}
+	glog.Infof("Waiting for backend service %s creation finished", bsName)
+	return gce.waitForGlobalOp(op)
 }
 
 func getAffinityOption(affinity string) string {

@@ -1,7 +1,9 @@
 package util
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"io/ioutil"
 	"net/http"
 )
@@ -29,4 +31,12 @@ func SendHTTPRequest(c *http.Client, req *http.Request, successCodes []int) (*ht
 	}
 
 	return response, nil
+}
+
+func ParseBody(body io.ReadCloser, v interface{}) error {
+	bytes, err := ioutil.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(bytes, v)
 }

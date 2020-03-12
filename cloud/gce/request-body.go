@@ -21,7 +21,7 @@ func (gce *Client) makeAttachOrDetachNetworkEndpointsBody(endpoints []NetworkEnd
 func (gce *Client) makeCreateNetworkEndpointGroupBody(name, network string) *bytes.Buffer {
 	return bytes.NewBuffer([]byte(fmt.Sprintf(`{
 		"name": "%s",
-		"description": "Managed by consul-lb-google",
+		"description": "Managed by consul-lb-gce",
 		"defaultPort": 80,
 		"networkEndpointType": "GCE_VM_IP_PORT",
 		"network": "%s"
@@ -31,7 +31,7 @@ func (gce *Client) makeCreateNetworkEndpointGroupBody(name, network string) *byt
 func (gce *Client) makeCreateHealthCheckBody(name, path string) *bytes.Buffer {
 	return bytes.NewBuffer([]byte(fmt.Sprintf(`{
 		"name": "%s",
-		"description": "Managed by consul-lb-google",
+		"description": "Managed by consul-lb-gce",
 		"kind": "compute#healthCheck",
 		"type": "HTTP",
 		"httpHealthCheck": {
@@ -43,23 +43,4 @@ func (gce *Client) makeCreateHealthCheckBody(name, path string) *bytes.Buffer {
 		"healthyThreshold": 2,
 		"unhealthyThreshold": 3
 	}`, name, path)))
-}
-
-func (gce *Client) makeCreateBackendServiceBody(name, groupName, healthCheckName, zone string, cdn bool, affinity string) *bytes.Buffer {
-	return bytes.NewBuffer([]byte(fmt.Sprintf(`{
-		"name": "%s",
-		"description": "Managed by consul-lb-google",
-		"backends": [
-			{
-				"group": "%s",
-				"balancingMode": "RATE",
-				"maxRatePerEndpoint": 10000
-			}
-		],
-		"healthChecks": [
-			"%s"
-		],
-		"enableCDN": %t,
-		"sessionAffinity": "%s"
-	}`, name, gce.makeNetworkEndpointGroupURL(groupName, zone), gce.makeHealthCheckURL(healthCheckName), cdn, affinity)))
 }

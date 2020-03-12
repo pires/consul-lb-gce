@@ -33,7 +33,3 @@ func (gce *Client) makeCreateNetworkEndpointGroupURL(zone string) string {
 func (gce *Client) makeCreateHealthCheckURL() string {
 	return fmt.Sprintf("%s/projects/%s/global/healthChecks", googleComputeAPIHost, gce.projectID)
 }
-
-func (gce *Client) makeCreateBackendServiceURL() string {
-	return fmt.Sprintf("%s/projects/%s/global/backendServices", googleComputeAPIHost, gce.projectID)
-}

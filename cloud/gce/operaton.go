@@ -2,8 +2,10 @@ package gce
 
 import (
 	"fmt"
+	"net/http"
 	"time"
 
+	"github.com/dffrntmedia/consul-lb-gce/util"
 	"github.com/golang/glog"
 	"google.golang.org/api/compute/v1"
 	"google.golang.org/api/googleapi"
@@ -55,4 +57,21 @@ func (gce *Client) waitForGlobalOp(op *compute.Operation) error {
 	return waitForOp(op, func(operationName string) (*compute.Operation, error) {
 		return gce.service.GlobalOperations.Get(gce.projectID, operationName).Do()
 	})
+}
+
+// func (gce *Client) waitForZondeOp(id string, zone string) error {
+// }
+
+type simpleOperation struct {
+	ID     string
+	Status string
+}
+
+func parseSimpleOperation(res *http.Response) (*simpleOperation, error) {
+	var op simpleOperation
+	return &op, util.ParseBody(res.Body, &op)
+}
+
+func simpleOperationIsDone(op *simpleOperation) bool {
+	return op != nil && op.Status == "DONE"
 }
