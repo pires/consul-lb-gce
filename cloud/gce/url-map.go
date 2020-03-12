@@ -100,6 +100,8 @@ func makePathRule(path string, backend string) *compute.PathRule {
 }
 
 func (gce *Client) makeBackendServiceURL(bs, zone string) string {
+	return fmt.Sprintf("%s/projects/%s/global/backendServices/%s", googleComputeAPIHost, gce.projectID, bs)
+	// TODO(max): Handle regional backend services
 	if zone == "global" {
 		return fmt.Sprintf("%s/projects/%s/global/backendServices/%s", googleComputeAPIHost, gce.projectID, bs)
 	}

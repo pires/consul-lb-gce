@@ -76,8 +76,10 @@ func (gce *Client) makeNetworkEndpointGroupURL(neg, zone string) string {
 }
 
 func (gce *Client) makeCreateBackendServiceURL(zone string) string {
-	if zone == "global" {
-		return fmt.Sprintf("%s/projects/%s/global/backendServices", googleComputeAPIHost, gce.projectID)
-	}
-	return fmt.Sprintf("%s/projects/%s/regions/%s/backendServices", googleComputeAPIHost, gce.projectID, parseRegion(zone))
+	return fmt.Sprintf("%s/projects/%s/global/backendServices", googleComputeAPIHost, gce.projectID)
+	// TODO(max): Handle regional backend services
+	// if zone == "global" {
+	// 	return fmt.Sprintf("%s/projects/%s/global/backendServices", googleComputeAPIHost, gce.projectID)
+	// }
+	// return fmt.Sprintf("%s/projects/%s/regions/%s/backendServices", googleComputeAPIHost, gce.projectID, parseRegion(zone))
 }
