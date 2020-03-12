@@ -38,10 +38,10 @@ func (gce *Client) makeCreateHealthCheckBody(name, path string) *bytes.Buffer {
 			"portSpecification": "USE_SERVING_PORT",
 			"requestPath": "%s"
 		},
-		"timeoutSec": 2,
-		"checkIntervalSec": 2,
+		"timeoutSec": 5,
+		"checkIntervalSec": 10,
 		"healthyThreshold": 2,
-		"unhealthyThreshold": 2
+		"unhealthyThreshold": 3
 	}`, name, path)))
 }
 
@@ -53,13 +53,13 @@ func (gce *Client) makeCreateBackendServiceBody(name, groupName, healthCheckName
 			{
 				"group": "%s",
 				"balancingMode": "RATE",
-				"maxRatePerEndpoint": 1000
+				"maxRatePerEndpoint": 10000
 			}
 		],
-  		"healthChecks": [
+		"healthChecks": [
 			"%s"
 		],
-  		"enableCDN": %t,
-  		"sessionAffinity": "%s"
+		"enableCDN": %t,
+		"sessionAffinity": "%s"
 	}`, name, gce.makeNetworkEndpointGroupURL(groupName, zone), gce.makeHealthCheckURL(healthCheckName), cdn, affinity)))
 }
