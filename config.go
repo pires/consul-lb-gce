@@ -2,24 +2,18 @@ package main
 
 import "fmt"
 
-type tagParserConfiguration struct {
-	Prefix string `json:"prefix"`
-}
-
 type healthCheckConfiguration struct {
 	Type string `json:"type"`
 	Path string `json:"path"`
 }
 
 type tagConfiguration struct {
-	Name                    string                   `json:"name"`
 	HealthCheck             healthCheckConfiguration `json:"healthCheck"`
 	SecondaryBackendService string                   `json:"secondaryBackendService,omitempty"`
 }
 
 type consulConfiguration struct {
-	URL  string             `json:"url"`
-	Tags []tagConfiguration `json:"tags"`
+	URL string `json:"url"`
 }
 
 type cloudConfiguration struct {
@@ -30,24 +24,22 @@ type cloudConfiguration struct {
 }
 
 type configuration struct {
-	TagParser tagParserConfiguration `json:"tagParser"`
-	Consul    consulConfiguration    `json:"consul"`
-	Cloud     cloudConfiguration     `json:"cloud"`
+	Tags   map[string]tagConfiguration `json:"tags"`
+	Consul consulConfiguration         `json:"consul"`
+	Cloud  cloudConfiguration          `json:"cloud"`
 }
 
-func (c *consulConfiguration) GetHealthCheck(tag string) (healthCheckConfiguration, error) {
-	for _, t := range c.Tags {
-		if t.Name == tag {
-			return t.HealthCheck, nil
-		}
+func (c *configuration) GetTagConfiguration(tag string) (tagConfiguration, error) {
+	if v, ok := c.Tags[tag]; ok {
+		return v, nil
 	}
-	return healthCheckConfiguration{}, fmt.Errorf("Health check path is not provided for tag %s", tag)
+	return tagConfiguration{}, fmt.Errorf("Tag %s is not found", tag)
 }
 
-func (c *consulConfiguration) GetTagNames() []string {
+func (c *configuration) GetTagNames() []string {
 	names := []string{}
-	for _, t := range c.Tags {
-		names = append(names, t.Name)
+	for k := range c.Tags {
+		names = append(names, k)
 	}
 	return names
 }

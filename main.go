@@ -42,7 +42,8 @@ func main() {
 		glog.Fatal(err)
 	}
 
-	tagParser := newTagParser(c.TagParser.Prefix)
+	glog.Infof("%v", c)
+	return
 
 	glog.Infof(
 		"Initializing cloud client with project ID: %s, network: %s, zone: %s ...",
@@ -58,7 +59,7 @@ func main() {
 	glog.Infof("Connecting to Consul at %s ...", c.Consul.URL)
 	r, err := consul.NewRegistry(&registry.Config{
 		Addresses:   []string{c.Consul.URL},
-		TagsToWatch: c.Consul.GetTagNames(),
+		TagsToWatch: c.GetTagNames(),
 	})
 	if err != nil {
 		glog.Fatal(err)
@@ -70,7 +71,7 @@ func main() {
 	glog.Info("Listening for service updates...")
 	go r.Run(updates, done)
 	// service updates handler
-	go handleServices(&c, client, tagParser, updates, done)
+	go handleServices(&c, client, updates, done)
 
 	// wait for Ctrl-c to stop server
 	osSignalChannel := make(chan os.Signal, 1)
@@ -83,7 +84,7 @@ func main() {
 }
 
 // Handles updates for all services and dispatch them between specific per service handlers.
-func handleServices(c *configuration, cloud cloud.Cloud, tagParser *tagParser, updates <-chan *registry.ServiceUpdate, done chan struct{}) {
+func handleServices(c *configuration, cloud cloud.Cloud, updates <-chan *registry.ServiceUpdate, done chan struct{}) {
 	var wg sync.WaitGroup
 	handlers := make(map[string]chan *registry.ServiceUpdate)
 
@@ -99,7 +100,7 @@ func handleServices(c *configuration, cloud cloud.Cloud, tagParser *tagParser, u
 				// start handler in its own goroutine
 				wg.Add(1)
 				glog.Infof("Initializing a handler for %s service", update.ServiceName)
-				go handleService(c, cloud, tagParser, update.Tag, handler, &wg, done)
+				go handleService(c, cloud, update.Tag, handler, &wg, done)
 			}
 			// send update to handler
 			handlers[update.ServiceName] <- update
@@ -116,13 +117,12 @@ func handleServices(c *configuration, cloud cloud.Cloud, tagParser *tagParser, u
 func handleService(
 	c *configuration,
 	client cloud.Cloud,
-	tagParser *tagParser,
 	tag string,
 	updates <-chan *registry.ServiceUpdate,
 	wg *sync.WaitGroup,
 	done chan struct{},
 ) {
-	tagInfo, err := tagParser.Parse(tag)
+	tagInfo, err := parseTag(tag)
 	if err != nil {
 		glog.Error(err)
 		return
@@ -151,14 +151,14 @@ func handleService(
 						continue
 					}
 
-					hc, err := c.Consul.GetHealthCheck(tag)
+					tagConfig, err := c.GetTagConfiguration(tag)
 					if err != nil {
 						glog.Error(err)
 						continue
 					}
 					hcName := makeName("hc", serviceGroupName)
 					glog.Infof("Creating health check %s ...", hcName)
-					if err := client.CreateHealthCheck(hcName, hc.Path); err != nil {
+					if err := client.CreateHealthCheck(hcName, tagConfig.HealthCheck.Path); err != nil {
 						glog.Errorf("Can't create health check %s: %v", hcName, err)
 						lock.Unlock()
 						continue

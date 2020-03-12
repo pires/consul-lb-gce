@@ -1,19 +1,15 @@
 {
-  "tagParser": {
-    "prefix": "consullbgce-"
+  "tags": {
+    "consullbgce-nocdn:noaffinity:subdomain.domain.com/": {
+      "secondaryBackendService": "secondary-backend-service-url-if-path-is-not-empty",
+      "healthCheck": {
+        "type": "http",
+        "path": "/health"
+      }
+    }
   },
   "consul": {
-    "url": "localhost:8500",
-    "tags": [
-      {
-        "name": "consullbgce-nocdn:noaffinity:subdomain.domain.com/",
-        "secondaryBackendService": "secondary-backend-service-url-if-path-is-not-empty",
-        "healthCheck": {
-          "type": "http",
-          "path": "/health"
-        }
-      }
-    ]
+    "url": "localhost:8500"
   },
   "cloud": {
     "project": "project-id",
