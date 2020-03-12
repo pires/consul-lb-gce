@@ -18,7 +18,7 @@ const (
 func (gce *Client) CreateBackendService(bsName, negName, hcName, zone, affinity string, cdn bool) error {
 	req, err := http.NewRequest(
 		"POST",
-		fmt.Sprintf("%s/projects/%s/global/backendServices", googleComputeAPIHost, gce.projectID),
+		gce.makeCreateBackendServiceURL(zone),
 		bytes.NewBuffer([]byte(fmt.Sprintf(`{
 				"name": "%s",
 				"description": "Managed by consul-lb-gce",
@@ -69,5 +69,20 @@ func getAffinityOption(affinity string) string {
 }
 
 func (gce *Client) makeNetworkEndpointGroupURL(neg, zone string) string {
+	if zone == "global" {
+		return fmt.Sprintf("%s/projects/%s/global/networkEndpointGroups/%s", googleComputeAPIHost, gce.projectID, neg)
+	}
 	return fmt.Sprintf("%s/projects/%s/zones/%s/networkEndpointGroups/%s", googleComputeAPIHost, gce.projectID, zone, neg)
+}
+
+func (gce *Client) makeCreateBackendServiceURL(zone string) string {
+	return fmt.Sprintf("%s/projects/%s/global/backendServices", googleComputeAPIHost, gce.projectID)
+
+	// TODO(max): Handle creating regional backend service
+	// https://cloud.google.com/compute/docs/reference/rest/v1/regionBackendServices
+
+	// if zone == "global" {
+	// 	return fmt.Sprintf("%s/projects/%s/global/backendServices", googleComputeAPIHost, gce.projectID)
+	// }
+	// return fmt.Sprintf("%s/projects/%s/zones/%s/backendServices", googleComputeAPIHost, gce.projectID, zone)
 }

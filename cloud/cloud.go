@@ -12,7 +12,7 @@ type Cloud interface {
 	AttachEndpointsToGroup(endpoints []gce.NetworkEndpoint, negName string) error
 	DetachEndpointsFromGroup(endpoints []gce.NetworkEndpoint, negName string) error
 	CreateBackendService(bsName string, negName string, hcName string, affinity string, cdn bool) error
-	UpdateURLMap(urlMapName, negName, host, path string) error
+	UpdateURLMap(urlMapName, bsName, host, path string) error
 }
 
 type gceCloud struct {

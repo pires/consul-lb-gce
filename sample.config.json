@@ -1,7 +1,6 @@
 {
   "tags": {
     "consullbgce-nocdn:noaffinity:subdomain.domain.com/": {
-      "secondaryBackendService": "secondary-backend-service-url-if-path-is-not-empty",
       "healthCheck": {
         "type": "http",
         "path": "/health"

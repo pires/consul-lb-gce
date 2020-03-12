@@ -8,8 +8,7 @@ type healthCheckConfiguration struct {
 }
 
 type tagConfiguration struct {
-	HealthCheck             healthCheckConfiguration `json:"healthCheck"`
-	SecondaryBackendService string                   `json:"secondaryBackendService,omitempty"`
+	HealthCheck healthCheckConfiguration `json:"healthCheck"`
 }
 
 type consulConfiguration struct {

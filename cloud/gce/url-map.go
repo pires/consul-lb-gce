@@ -1,6 +1,7 @@
 package gce
 
 import (
+	"fmt"
 	"strings"
 
 	"google.golang.org/api/compute/v1"
@@ -96,4 +97,11 @@ func makePathRule(path string, backend string) *compute.PathRule {
 		Paths:   paths,
 		Service: backend,
 	}
+}
+
+func (gce *Client) makeBackendServiceURL(bs, zone string) string {
+	if zone == "global" {
+		return fmt.Sprintf("%s/projects/%s/global/backendServices/%s", googleComputeAPIHost, gce.projectID, bs)
+	}
+	return ""
 }
