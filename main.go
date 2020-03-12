@@ -1,16 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
+	"io/ioutil"
 	"os"
 	"os/signal"
 	"strings"
 	"sync"
 
-	"github.com/dffrntmedia/consul-lb-gce/cloud/gce"
-
-	"github.com/BurntSushi/toml"
 	"github.com/dffrntmedia/consul-lb-gce/cloud"
+	"github.com/dffrntmedia/consul-lb-gce/cloud/gce"
 	"github.com/dffrntmedia/consul-lb-gce/registry"
 	"github.com/dffrntmedia/consul-lb-gce/registry/consul"
 	"github.com/golang/glog"
@@ -22,7 +22,7 @@ const (
 
 func main() {
 	var configurationPath string
-	flag.StringVar(&configurationPath, "config", "config.toml", "Configuration path")
+	flag.StringVar(&configurationPath, "config", "config.json", "Configuration path")
 	flag.Parse()
 	if configurationPath == "" {
 		glog.Fatal("Configuration path is required")
@@ -30,11 +30,21 @@ func main() {
 
 	glog.Infof("Reading configuration from %s ...", configurationPath)
 	var c configuration
-	if _, err := toml.DecodeFile(configurationPath, &c); err != nil {
+	configFile, err := os.Open(configurationPath)
+	if err != nil {
 		glog.Fatal(err)
 	}
+	configBytes, err := ioutil.ReadAll(configFile)
+	if err != nil {
+		glog.Fatal(err)
+	}
+	if err := json.Unmarshal(configBytes, &c); err != nil {
+		glog.Fatal(err)
+	}
+	glog.Infof("%v", c)
+	return
 
-	tagParser := newTagParser(c.TagParser.TagPrefix)
+	tagParser := newTagParser(c.TagParser.Prefix)
 
 	glog.Infof(
 		"Initializing cloud client with project ID: %s, network: %s, zone: %s ...",
@@ -50,7 +60,7 @@ func main() {
 	glog.Infof("Connecting to Consul at %s ...", c.Consul.URL)
 	r, err := consul.NewRegistry(&registry.Config{
 		Addresses:   []string{c.Consul.URL},
-		TagsToWatch: c.Consul.TagsToWatch,
+		TagsToWatch: c.Consul.GetTagNames(),
 	})
 	if err != nil {
 		glog.Fatal(err)
@@ -143,14 +153,14 @@ func handleService(
 						continue
 					}
 
-					hcPath, err := c.Consul.GetHealthCheckPath(tag)
+					hc, err := c.Consul.GetHealthCheck(tag)
 					if err != nil {
 						glog.Error(err)
 						continue
 					}
 					hcName := makeName("hc", serviceGroupName)
 					glog.Infof("Creating health check %s ...", hcName)
-					if err := client.CreateHealthCheck(hcName, hcPath); err != nil {
+					if err := client.CreateHealthCheck(hcName, hc.Path); err != nil {
 						glog.Errorf("Can't create health check %s: %v", hcName, err)
 						lock.Unlock()
 						continue

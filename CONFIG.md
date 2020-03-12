@@ -1,6 +1,6 @@
 # Consul LB GCE Configuration
 
-You can find configuration sample in [file](./sample.config.toml).
+You can find configuration sample in [file](./sample.config.json).
 
 ## Tag format
 

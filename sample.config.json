@@ -1,0 +1,24 @@
+{
+  "tagParser": {
+    "prefix": "consullbgce-"
+  },
+  "consul": {
+    "url": "localhost:8500",
+    "tags": [
+      {
+        "name": "consullbgce-nocdn:noaffinity:subdomain.domain.com/",
+        "secondaryBackendService": "secondary-backend-service-url-if-path-is-not-empty",
+        "healthCheck": {
+          "type": "http",
+          "path": "/health"
+        }
+      }
+    ]
+  },
+  "cloud": {
+    "project": "project-id",
+    "network": "default",
+    "zone": "region-and-zone",
+    "urlMap": "url-map-name"
+  }
+}

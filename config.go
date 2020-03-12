@@ -3,32 +3,51 @@ package main
 import "fmt"
 
 type tagParserConfiguration struct {
-	TagPrefix string `toml:"tag_prefix"`
+	Prefix string `json:"prefix"`
+}
+
+type healthCheckConfiguration struct {
+	Type string `json:"type"`
+	Path string `json:"path"`
+}
+
+type tagConfiguration struct {
+	Name                    string                   `json:"name"`
+	HealthCheck             healthCheckConfiguration `json:"healthCheck"`
+	SecondaryBackendService string                   `json:"secondaryBackendService,omitempty"`
 }
 
 type consulConfiguration struct {
-	URL         string   `toml:"url"`
-	TagsToWatch []string `toml:"tags_to_watch"`
-	// NOTE: We specify it explicitly in configuration coz Consul doesn't provide this information via API
-	HealthChecksPaths map[string]string `toml:"health_checks_paths"`
+	URL  string             `json:"url"`
+	Tags []tagConfiguration `json:"tags"`
 }
 
 type cloudConfiguration struct {
-	Project string
-	Network string
-	Zone    string
-	URLMap  string `toml:"url_map"`
+	Project string `json:"project"`
+	Network string `json:"network"`
+	Zone    string `json:"zone"`
+	URLMap  string `json:"urlMap"`
 }
 
 type configuration struct {
-	TagParser tagParserConfiguration `toml:"tag_parser"`
-	Consul    consulConfiguration
-	Cloud     cloudConfiguration
+	TagParser tagParserConfiguration `json:"tagParser"`
+	Consul    consulConfiguration    `json:"consul"`
+	Cloud     cloudConfiguration     `json:"cloud"`
 }
 
-func (c *consulConfiguration) GetHealthCheckPath(tag string) (string, error) {
-	if v, ok := c.HealthChecksPaths[tag]; ok {
-		return v, nil
+func (c *consulConfiguration) GetHealthCheck(tag string) (healthCheckConfiguration, error) {
+	for _, t := range c.Tags {
+		if t.Name == tag {
+			return t.HealthCheck, nil
+		}
 	}
-	return "", fmt.Errorf("Health check path is not provided for tag %s", tag)
+	return healthCheckConfiguration{}, fmt.Errorf("Health check path is not provided for tag %s", tag)
+}
+
+func (c *consulConfiguration) GetTagNames() []string {
+	names := []string{}
+	for _, t := range c.Tags {
+		names = append(names, t.Name)
+	}
+	return names
 }
