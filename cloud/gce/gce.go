@@ -3,6 +3,7 @@ package gce
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 
 	"google.golang.org/api/dns/v1"
 
@@ -59,4 +60,9 @@ func New(project string, network string) (*Client, error) {
 		// TODO(max): Consider zoned network
 		networkURL: fmt.Sprintf("%s/projects/%s/global/networks/%s", googleComputeAPIHost, project, network),
 	}, nil
+}
+
+func parseRegion(zone string) string {
+	// zone letter is from https://cloud.google.com/compute/docs/regions-zones
+	return regexp.MustCompile(`-[a-z]$`).ReplaceAllString(zone, "")
 }

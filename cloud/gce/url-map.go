@@ -103,5 +103,5 @@ func (gce *Client) makeBackendServiceURL(bs, zone string) string {
 	if zone == "global" {
 		return fmt.Sprintf("%s/projects/%s/global/backendServices/%s", googleComputeAPIHost, gce.projectID, bs)
 	}
-	return ""
+	return fmt.Sprintf("%s/projects/%s/regions/%s/backendServices/%s", googleComputeAPIHost, gce.projectID, parseRegion(zone), bs)
 }

@@ -76,13 +76,8 @@ func (gce *Client) makeNetworkEndpointGroupURL(neg, zone string) string {
 }
 
 func (gce *Client) makeCreateBackendServiceURL(zone string) string {
-	return fmt.Sprintf("%s/projects/%s/global/backendServices", googleComputeAPIHost, gce.projectID)
-
-	// TODO(max): Handle creating regional backend service
-	// https://cloud.google.com/compute/docs/reference/rest/v1/regionBackendServices
-
-	// if zone == "global" {
-	// 	return fmt.Sprintf("%s/projects/%s/global/backendServices", googleComputeAPIHost, gce.projectID)
-	// }
-	// return fmt.Sprintf("%s/projects/%s/zones/%s/backendServices", googleComputeAPIHost, gce.projectID, zone)
+	if zone == "global" {
+		return fmt.Sprintf("%s/projects/%s/global/backendServices", googleComputeAPIHost, gce.projectID)
+	}
+	return fmt.Sprintf("%s/projects/%s/regions/%s/backendServices", googleComputeAPIHost, gce.projectID, parseRegion(zone))
 }
