@@ -47,7 +47,7 @@ func main() {
 		glog.Fatal(err)
 	}
 
-	glog.Infof("Connecting to Consul at %s...", c.Consul.URL)
+	glog.Infof("Connecting to Consul at %s ...", c.Consul.URL)
 	r, err := consul.NewRegistry(&registry.Config{
 		Addresses:   []string{c.Consul.URL},
 		TagsToWatch: c.Consul.TagsToWatch,
@@ -69,7 +69,7 @@ func main() {
 	signal.Notify(osSignalChannel, os.Interrupt, os.Kill)
 	<-osSignalChannel
 
-	glog.Info("Terminating all pending jobs...")
+	glog.Info("Terminating...")
 	close(done)
 	glog.Info("Terminated")
 }
@@ -82,7 +82,7 @@ func handleServices(c *configuration, cloud cloud.Cloud, tagParser *tagParser, u
 	for {
 		select {
 		case update := <-updates:
-			glog.Infof("%s is updated", update.ServiceName)
+			glog.Infof("Handling %s service update", update.ServiceName)
 			// is there a handler for updated service?
 			if handler, ok := handlers[update.ServiceName]; !ok {
 				// no handler
@@ -90,7 +90,7 @@ func handleServices(c *configuration, cloud cloud.Cloud, tagParser *tagParser, u
 				handlers[update.ServiceName] = handler
 				// start handler in its own goroutine
 				wg.Add(1)
-				glog.Infof("Starting handler for %s", update.ServiceName)
+				glog.Infof("Initializing a handler for %s service", update.ServiceName)
 				go handleService(c, cloud, tagParser, update.Tag, handler, &wg, done)
 			}
 			// send update to handler
@@ -183,7 +183,7 @@ func handleService(
 					}
 
 					isRunning = true
-					glog.Infof("Watching service with tag [%s].", tag)
+					glog.Infof("Watching service with tag [%s]", tag)
 				}
 				lock.Unlock()
 			case registry.DELETED:
@@ -203,7 +203,7 @@ func handleService(
 					//do we have instances to remove from the NEG?
 					if len(toRemove) > 0 {
 						if err := client.DetachEndpointsFromGroup(toRemove, makeName("neg", serviceGroupName)); err != nil {
-							glog.Errorf("Failed removing instances from network endpoint group [%s]. %s", makeName("neg", serviceGroupName), err)
+							glog.Errorf("Failed detaching endpoints from %s network endpoint group: %v", makeName("neg", serviceGroupName), err)
 						}
 					}
 
@@ -215,7 +215,7 @@ func handleService(
 
 				// validate if we've created the instance group for this service
 				if !isRunning {
-					glog.Warningf("Ignoring received event for service with tag [%s] because it's not running.", tag)
+					glog.Warningf("Ignoring received event for service with tag %s because it's not running", tag)
 					lock.Unlock()
 					break
 				}
@@ -251,14 +251,14 @@ func handleService(
 				//do we have instances to remove from the NEG?
 				if len(toRemove) > 0 {
 					if err := client.DetachEndpointsFromGroup(toRemove, makeName("neg", serviceGroupName)); err != nil {
-						glog.Errorf("Failed removing instances from network endpoint group [%s]. %s", makeName("neg", serviceGroupName), err)
+						glog.Errorf("Failed detaching endpoints from %s network endpoint group: %v", makeName("neg", serviceGroupName), err)
 					}
 				}
 
 				// do we have new instances to add to the NEG?
 				if len(toAdd) > 0 {
 					if err := client.AttachEndpointsToGroup(toAdd, makeName("neg", serviceGroupName)); err != nil {
-						glog.Errorf("Failed adding instances to network endpoint group [%s]. %s", makeName("neg", serviceGroupName), err)
+						glog.Errorf("Failed adding endpoints to %s network endpoint group: %v", makeName("neg", serviceGroupName), err)
 					}
 				}
 
@@ -267,7 +267,7 @@ func handleService(
 				continue
 			}
 		case <-done:
-			glog.Warningf("Received termination signal for service with tag [%s]", tag)
+			glog.Warningf("Received termination signal for service with tag %s", tag)
 			wg.Done()
 			return
 		}

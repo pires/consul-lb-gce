@@ -33,10 +33,7 @@ func waitForOp(op *compute.Operation, getOperation func() (*compute.Operation, e
 
 	return wait.Poll(operationPollInterval, operationPollTimeoutDuration, func() (bool, error) {
 		pollOp, err := getOperation()
-		if err != nil {
-			glog.Warningf("GCE poll operation failed: %v", err)
-		}
-		return opIsDone(pollOp), getErrorFromOp(pollOp)
+		return opIsDone(pollOp), err
 	})
 }
 
@@ -46,12 +43,10 @@ func opIsDone(op *compute.Operation) bool {
 
 func getErrorFromOp(op *compute.Operation) error {
 	if op != nil && op.Error != nil && len(op.Error.Errors) > 0 {
-		err := &googleapi.Error{
+		return &googleapi.Error{
 			Code:    int(op.HttpErrorStatusCode),
 			Message: op.Error.Errors[0].Message,
 		}
-		glog.Errorf("GCE operation failed: %v", err)
-		return err
 	}
 
 	return nil
