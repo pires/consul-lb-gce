@@ -13,7 +13,7 @@
   },
   "cloud": {
     "project": "project-id",
-    "network": "default",
+    "network": "network-name",
     "zone": "region-and-zone",
     "urlMap": "url-map-name"
   }
