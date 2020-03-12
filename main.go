@@ -41,8 +41,6 @@ func main() {
 	if err := json.Unmarshal(configBytes, &c); err != nil {
 		glog.Fatal(err)
 	}
-	glog.Infof("%v", c)
-	return
 
 	tagParser := newTagParser(c.TagParser.Prefix)
 
