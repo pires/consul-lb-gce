@@ -42,9 +42,6 @@ func main() {
 		glog.Fatal(err)
 	}
 
-	glog.Infof("%v", c)
-	return
-
 	glog.Infof(
 		"Initializing cloud client with project ID: %s, network: %s, zone: %s ...",
 		c.Cloud.Project,
