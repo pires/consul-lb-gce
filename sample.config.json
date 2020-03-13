@@ -1,0 +1,19 @@
+{
+  "tags": {
+    "consullbgce-nocdn:noaffinity:subdomain.domain.com/": {
+      "healthCheck": {
+        "type": "http",
+        "path": "/health"
+      }
+    }
+  },
+  "consul": {
+    "url": "localhost:8500"
+  },
+  "cloud": {
+    "project": "project-id",
+    "network": "network-name",
+    "zone": "region-and-zone",
+    "urlMap": "url-map-name"
+  }
+}

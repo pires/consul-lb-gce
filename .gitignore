@@ -16,10 +16,11 @@ pkg
 *.pb.go
 
 ## user configuration
-*.toml
 *.json
+!sample.config.json
 
-src/github.com/pires/consul-lb-google/consul-lb-google
-src/github.com/pires/consul-lb-google/vendor/**
+## binaries
+consul-lb-gce
 
+## MacOS
 **/.DS_Store
