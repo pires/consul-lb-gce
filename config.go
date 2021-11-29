@@ -8,7 +8,10 @@ type healthCheckConfiguration struct {
 }
 
 type tagConfiguration struct {
-	HealthCheck healthCheckConfiguration `json:"healthCheck"`
+	// todo(max): Add names of resources to reuse
+	ReuseResources           bool                     `json:"reuseResources"`
+	NetworkEndpointGroupName string                   `json:"networkEndpointGroupName"`
+	HealthCheck              healthCheckConfiguration `json:"healthCheck"`
 }
 
 type consulConfiguration struct {

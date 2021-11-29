@@ -1,5 +1,12 @@
 {
   "tags": {
+    "core": {
+      "reuseResources": true,
+      "healthCheck": {
+        "type": "http",
+        "path": "/actuator/health"
+      }
+    },
     "consullbgce-nocdn:noaffinity:subdomain.domain.com/": {
       "healthCheck": {
         "type": "http",

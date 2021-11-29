@@ -21,16 +21,16 @@ const (
 )
 
 func main() {
-	var configurationPath string
-	flag.StringVar(&configurationPath, "config", "config.json", "Configuration path")
+	var configFilePath string
+	flag.StringVar(&configFilePath, "config", "config.json", "Configuration path")
 	flag.Parse()
-	if configurationPath == "" {
+	if configFilePath == "" {
 		glog.Fatal("Configuration path is required")
 	}
 
-	glog.Infof("Reading configuration from %s ...", configurationPath)
+	glog.Infof("Reading configuration from %q ...", configFilePath)
 	var c configuration
-	configFile, err := os.Open(configurationPath)
+	configFile, err := os.Open(configFilePath)
 	if err != nil {
 		glog.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func main() {
 	}
 
 	glog.Infof(
-		"Initializing cloud client with project ID: %s, network: %s, zone: %s ...",
+		"Initializing cloud client with project ID: %q, network: %q, zone: %q ...",
 		c.Cloud.Project,
 		c.Cloud.Network,
 		c.Cloud.Zone,
@@ -53,7 +53,7 @@ func main() {
 		glog.Fatal(err)
 	}
 
-	glog.Infof("Connecting to Consul at %s ...", c.Consul.URL)
+	glog.Infof("Connecting to Consul at %q ...", c.Consul.URL)
 	r, err := consul.NewRegistry(&registry.Config{
 		Addresses:   []string{c.Consul.URL},
 		TagsToWatch: c.GetTagNames(),
@@ -67,8 +67,8 @@ func main() {
 
 	glog.Info("Listening for service updates...")
 	go r.Run(updates, done)
-	// service updates handler
-	go handleServices(&c, client, updates, done)
+
+	go dispatchUpdates(&c, client, updates, done)
 
 	// wait for Ctrl-c to stop server
 	osSignalChannel := make(chan os.Signal, 1)
@@ -80,38 +80,39 @@ func main() {
 	glog.Info("Terminated")
 }
 
-// Handles updates for all services and dispatch them between specific per service handlers.
-func handleServices(c *configuration, cloud cloud.Cloud, updates <-chan *registry.ServiceUpdate, done chan struct{}) {
+// Dispatches updates for all services between per service channels.
+func dispatchUpdates(c *configuration, cloud cloud.Cloud, updates <-chan *registry.ServiceUpdate, done chan struct{}) {
 	var wg sync.WaitGroup
-	handlers := make(map[string]chan *registry.ServiceUpdate)
+	serviceUpdatesMap := make(map[string]chan *registry.ServiceUpdate)
 
 	for {
 		select {
 		case update := <-updates:
-			glog.Infof("Handling %s service update", update.ServiceName)
-			// is there a handler for updated service?
-			if handler, ok := handlers[update.ServiceName]; !ok {
+			// is there a channel for service updates?
+			if serviceUpdates, ok := serviceUpdatesMap[update.ServiceName]; !ok {
 				// no handler
-				handler = make(chan *registry.ServiceUpdate)
-				handlers[update.ServiceName] = handler
+				serviceUpdates = make(chan *registry.ServiceUpdate)
+				serviceUpdatesMap[update.ServiceName] = serviceUpdates
 				// start handler in its own goroutine
 				wg.Add(1)
-				glog.Infof("Initializing a handler for %s service", update.ServiceName)
-				go handleService(c, cloud, update.Tag, handler, &wg, done)
+				glog.Infof("Initializing a handler for %q service...", update.ServiceName)
+				go handleServiceUpdates(c, cloud, update.Tag, serviceUpdates, &wg, done)
 			}
-			// send update to handler
-			handlers[update.ServiceName] <- update
+			// send update to channel
+			serviceUpdatesMap[update.ServiceName] <- update
 		case <-done:
-			// wait for all handlers to terminate
+			// wait for all updates are processed
 			wg.Wait()
 			return
 		}
 	}
 }
 
-// handleService handles service updates in a consistent way.
-// It will run until service is deleted or done is closed.
-func handleService(
+// todo(max): Think about one more layer so that this function just sends updates into loadbalancer as data into that layer, hecne it's possible to test logic of the function.
+
+// Handles service updates in a consistent way.
+// It's up until service is deleted or done is closed.
+func handleServiceUpdates(
 	c *configuration,
 	client cloud.Cloud,
 	tag string,
@@ -119,14 +120,36 @@ func handleService(
 	wg *sync.WaitGroup,
 	done chan struct{},
 ) {
-	tagInfo, err := parseTag(tag)
+	tagConfig, err := c.GetTagConfiguration(tag)
 	if err != nil {
 		glog.Error(err)
 		return
 	}
 
-	serviceGroupName := tagInfo.String()
+	shouldReuseResources := tagConfig.ReuseResources
 
+	var tagInfo *tagInfo
+	if !shouldReuseResources {
+		tagInfo, err = parseTag(tag)
+		if err != nil {
+			glog.Error(err)
+			return
+		}
+	}
+
+	var serviceGroupName string
+	if !shouldReuseResources {
+		serviceGroupName = tagInfo.String()
+	}
+
+	negName := func() string {
+		if shouldReuseResources {
+			return tagConfig.NetworkEndpointGroupName
+		}
+		return makeName("neg", serviceGroupName)
+	}()
+
+	// todo(max): Why do we need lock if all service updates are processed one by one? It makes more sense to have one lock for all services if we update common resource as e.g. url map.
 	lock := &sync.RWMutex{}
 	isRunning := false
 	instances := make(map[string]*registry.ServiceInstance)
@@ -138,57 +161,56 @@ func handleService(
 			case registry.NEW:
 				lock.Lock()
 				if !isRunning {
-					glog.Infof("Initializing service with tag %s ...", tag)
+					glog.Infof("Initializing service with tag %q ...", tag)
 
-					negName := makeName("neg", serviceGroupName)
-					glog.Infof("Creating network endpoint group %s ...", negName)
-					if err := client.CreateNetworkEndpointGroup(negName); err != nil {
-						glog.Errorf("Can't create network endpoint group %s: %v", negName, err)
-						lock.Unlock()
-						continue
-					}
+					if shouldReuseResources {
+						glog.Infof("Service with tag %q will re-use resources", tag)
+					} else {
+						negName := makeName("neg", serviceGroupName)
+						glog.Infof("Creating network endpoint group %q ...", negName)
+						if err := client.CreateNetworkEndpointGroup(negName); err != nil {
+							glog.Errorf("Can't create network endpoint group %q: %+v", negName, err)
+							lock.Unlock()
+							continue
+						}
 
-					tagConfig, err := c.GetTagConfiguration(tag)
-					if err != nil {
-						glog.Error(err)
-						continue
-					}
-					hcName := makeName("hc", serviceGroupName)
-					glog.Infof("Creating health check %s ...", hcName)
-					if err := client.CreateHealthCheck(hcName, tagConfig.HealthCheck.Path); err != nil {
-						glog.Errorf("Can't create health check %s: %v", hcName, err)
-						lock.Unlock()
-						continue
-					}
+						hcName := makeName("hc", serviceGroupName)
+						glog.Infof("Creating health check %q ...", hcName)
+						if err := client.CreateHealthCheck(hcName, tagConfig.HealthCheck.Path); err != nil {
+							glog.Errorf("Can't create health check %q: %+v", hcName, err)
+							lock.Unlock()
+							continue
+						}
 
-					bsName := makeName("bs", serviceGroupName)
-					glog.Infof("Creating backend service %s ...", bsName)
-					if err = client.CreateBackendService(
-						bsName,
-						negName,
-						hcName,
-						tagInfo.Affinity,
-						tagInfo.CDN,
-					); err != nil {
-						glog.Errorf("Can't create backend service %s: %v", bsName, err)
-						lock.Unlock()
-						continue
-					}
+						bsName := makeName("bs", serviceGroupName)
+						glog.Infof("Creating backend service %q ...", bsName)
+						if err = client.CreateBackendService(
+							bsName,
+							negName,
+							hcName,
+							tagInfo.Affinity,
+							tagInfo.CDN,
+						); err != nil {
+							glog.Errorf("Can't create backend service %q: %+v", bsName, err)
+							lock.Unlock()
+							continue
+						}
 
-					glog.Infof("Updating URL map %s ...", c.Cloud.URLMap)
-					if err := client.UpdateURLMap(
-						c.Cloud.URLMap,
-						bsName,
-						tagInfo.Host,
-						tagInfo.Path,
-					); err != nil {
-						glog.Errorf("Can't update URL map %s: %v", c.Cloud.URLMap, err)
-						lock.Unlock()
-						continue
+						glog.Infof("Updating URL map %q ...", c.Cloud.URLMap)
+						if err := client.UpdateURLMap(
+							c.Cloud.URLMap,
+							bsName,
+							tagInfo.Host,
+							tagInfo.Path,
+						); err != nil {
+							glog.Errorf("Can't update URL map %q: %+v", c.Cloud.URLMap, err)
+							lock.Unlock()
+							continue
+						}
 					}
 
 					isRunning = true
-					glog.Infof("Watching service with tag [%s]", tag)
+					glog.Infof("Watching service with tag [%q]", tag)
 				}
 				lock.Unlock()
 			case registry.DELETED:
@@ -207,8 +229,8 @@ func handleService(
 
 					//do we have instances to remove from the NEG?
 					if len(toRemove) > 0 {
-						if err := client.DetachEndpointsFromGroup(toRemove, makeName("neg", serviceGroupName)); err != nil {
-							glog.Errorf("Failed detaching endpoints from %s network endpoint group: %v", makeName("neg", serviceGroupName), err)
+						if err := client.DetachEndpointsFromGroup(toRemove, negName); err != nil {
+							glog.Errorf("Failed detaching endpoints from %q network endpoint group: %+v", negName, err)
 						}
 					}
 
@@ -217,10 +239,11 @@ func handleService(
 				lock.Unlock()
 			case registry.CHANGED:
 				lock.Lock()
+				glog.Infof("Changed %q", tag)
 
 				// validate if we've created the instance group for this service
 				if !isRunning {
-					glog.Warningf("Ignoring received event for service with tag %s because it's not running", tag)
+					glog.Warningf("Ignoring received event for service with tag %q because it's not running", tag)
 					lock.Unlock()
 					break
 				}
@@ -255,15 +278,15 @@ func handleService(
 
 				//do we have instances to remove from the NEG?
 				if len(toRemove) > 0 {
-					if err := client.DetachEndpointsFromGroup(toRemove, makeName("neg", serviceGroupName)); err != nil {
-						glog.Errorf("Failed detaching endpoints from %s network endpoint group: %v", makeName("neg", serviceGroupName), err)
+					if err := client.DetachEndpointsFromGroup(toRemove, negName); err != nil {
+						glog.Errorf("Failed detaching endpoints from %q network endpoint group: %+v", negName, err)
 					}
 				}
 
 				// do we have new instances to add to the NEG?
 				if len(toAdd) > 0 {
-					if err := client.AttachEndpointsToGroup(toAdd, makeName("neg", serviceGroupName)); err != nil {
-						glog.Errorf("Failed adding endpoints to %s network endpoint group: %v", makeName("neg", serviceGroupName), err)
+					if err := client.AttachEndpointsToGroup(toAdd, negName); err != nil {
+						glog.Errorf("Failed adding endpoints to %q network endpoint group: %+v", negName, err)
 					}
 				}
 
@@ -272,7 +295,7 @@ func handleService(
 				continue
 			}
 		case <-done:
-			glog.Warningf("Received termination signal for service with tag %s", tag)
+			glog.Warningf("Received termination signal for service with tag %q", tag)
 			wg.Done()
 			return
 		}
